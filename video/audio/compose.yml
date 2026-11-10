@@ -1,0 +1,50 @@
+# Opt-in: a lab go2rtc whose streams have a "speaker" (receiver.sh) for two-way audio tests, with
+# its own copy of the test stream for the sound scenes. Both sit on `lab-audio`, an internal Docker
+# network: no published ports, no route out of the machine, nothing on the host or the LAN reaches
+# them. Start only through lab-go2rtc.sh (it sets the images, the user and the data folders); no
+# restart policy.
+services:
+  lab-audio-stream:
+    container_name: lab-audio-stream
+    image: ${LAB_MEDIAMTX_IMAGE:?start it with video/audio/lab-go2rtc.sh up}
+    restart: "no"
+    user: "${LAB_UID:?}:${LAB_GID:?}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["/config/mediamtx.yml"]
+    cpus: 1.0
+    mem_limit: 512m
+    volumes:
+      - ../teststream/mediamtx.yml:/config/mediamtx.yml:ro
+    networks: [lab-audio]
+  lab-go2rtc:
+    container_name: lab-go2rtc
+    image: ${LAB_GO2RTC_IMAGE:?start it with video/audio/lab-go2rtc.sh up}
+    restart: "no"
+    # The host user, so the speaker can write into the bind-mounted status folder.
+    user: "${LAB_UID:?}:${LAB_GID:?}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    mem_limit: 256m
+    command: ["go2rtc", "-c", "/audio/go2rtc.yaml"]
+    depends_on: [lab-audio-stream]
+    volumes:
+      - ./:/audio:ro
+      - ${TALK_STATUS_DIR:?}:/status
+      - ${LAB_AUDIO_DATA:?}/tone.wav:/data/tone.wav:ro
+    networks: [lab-audio]
+networks:
+  lab-audio:
+    name: lab-audio
+    internal: true

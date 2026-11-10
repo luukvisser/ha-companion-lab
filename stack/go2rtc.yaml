@@ -1,0 +1,29 @@
+# go2rtc for the isolated Avent test stack: Home Assistant's WebRTC server (HA points at it with
+# `go2rtc: url:`), as in a production setup with an external go2rtc.
+#
+# The API listens only on the stack's internal network; WebRTC media on 8557, published on this
+# machine's 127.0.0.1 only. The candidates are what a client is told to connect to: 10.0.2.2 is
+# this machine's loopback as the Android emulator sees it, 127.0.0.1 is for a browser on this
+# machine. No STUN/TURN: nothing here should reach the internet.
+
+app:
+  # mjpeg serves /api/frame.jpeg, which HA uses for the snapshot of a stream-only camera (e.g.
+  # a Generic camera on the test stream); without it those snapshots fail with HTTP 500.
+  modules: ["api", "exec", "ffmpeg", "http", "mjpeg", "rtsp", "srtp", "webrtc", "ws"]
+
+api:
+  listen: "172.31.240.4:1984"
+
+exec:
+  allow_paths:
+    - ffmpeg
+
+rtsp:
+  listen: "127.0.0.1:8554"
+
+webrtc:
+  listen: ":8557"
+  candidates:
+    - 10.0.2.2:8557
+    - 127.0.0.1:8557
+  ice_servers: []

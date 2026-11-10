@@ -1,0 +1,28 @@
+# A lab go2rtc for two-way audio tests (video/audio/README.md): each stream plays a sound scene and
+# has a "speaker" (receiver.sh) that records what is talked back to it. Started by lab-go2rtc.sh.
+#
+# Locked down (three security reviews, 10-11-2026): nothing outside this container can reach the
+# API. It listens on the container's own loopback; the container has no published port and sits on
+# an internal Docker network with no route out (compose.yml). lab-go2rtc.sh drives it with
+# `docker exec`. So no page in a browser and no process on the host or the LAN can call it, and it
+# needs no login. No WebRTC module: nothing gathers candidates or asks a STUN server.
+app:
+  modules: ["api", "exec", "ffmpeg", "rtsp"]
+api:
+  listen: "127.0.0.1:1984"
+# `exec` also governs `ffmpeg:` sources in go2rtc 1.9.15: only the speaker script and ffmpeg (the
+# talk-test tone) may start.
+exec:
+  allow_paths:
+    - /audio/receiver.sh
+    - ffmpeg
+# go2rtc as an RTSP client only (the sound scenes); no RTSP server.
+rtsp:
+  listen: ""
+streams:
+  doorbell:
+    - rtsp://lab-audio-stream:8554/doorbell
+    - exec:/audio/receiver.sh doorbell#backchannel=1#audio=alaw/8000
+  baby:
+    - rtsp://lab-audio-stream:8554/baby
+    - exec:/audio/receiver.sh baby#backchannel=1#audio=alaw/8000

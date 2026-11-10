@@ -1,0 +1,183 @@
+#!/bin/bash
+# lab <command>: the front door of the lab (Docker route). Each command wraps the scripts that do the
+# work, so they stay usable on their own.
+#
+#   lab doctor              checks the machine: KVM, Docker, a stray adb server, disk, images,
+#                           Playwright's node_modules, your lab.env
+#   lab up [--gpu] [--bridge] [--own-ha]
+#                           starts the lab's own Home Assistant (stack/: a throwaway test HA with a
+#                           test camera and dashboard) and the emulator, and logs the app in as the
+#                           limited test user the first time. --gpu: GPU rendering (docs/gpu.md);
+#                           --bridge: the Avent add-on's simulated bridge; --own-ha: no lab HA, use
+#                           the Home Assistant set in lab.env
+#   lab status              what runs, what the app shows, which card build, stream and card
+#                           configuration the test dashboard has
+#   lab down [--all]        stops the emulator; --all also the lab's Home Assistant
+#   lab shot [name]         a screenshot to $OUT_DIR/<name>.png
+#   lab pip on|off|status   picture-in-picture for the Companion app (Android's own permission), now;
+#                           the lab's default is on (APP_PIP, Android's default: Home in fullscreen
+#                           floats the video and the page stays visible); off: leaving a fullscreen
+#                           card hides the page, as on a real Pixel. In scripts:
+#                           `APP_PIP=off lab card ...` (applied when the app starts fresh)
+#   lab key home|back|switcher|off|on|front
+#                           a way out of the app or back (tools/emu.sh; in fullscreen only switcher
+#                           and off hide the page, home does not)
+#   lab reset-state         back to the defaults after measurements: card build $LAB_DEFAULT_BUILD,
+#                           the test camera on $LAB_DEFAULT_STREAM, the plain test card, app restarted
+#   lab playwright-install  playwright-core (the Playwright image's version) into PW_NODE_MODULES
+#   lab build <checkout> <name>
+#                           builds the card from a checkout into $BUILDS_DIR/<name> (one per PR)
+#   lab card ...            card measurements (video/advanced-camera-card/card.sh)
+#   lab prof ...            profilers (tools/prof.sh)
+#   lab stack ...           the lab's Home Assistant directly (stack/stack.sh: up, down, reset,
+#                           card, status, logs, talk, ...)
+#
+# Settings: lab.env (yours) over defaults.env; all of them in docs/settings.md.
+set -euo pipefail
+LAB=$(cd "$(dirname "$0")" && pwd)
+. "$LAB/lib.sh"
+COMPOSE=(docker compose -f "$LAB/docker/compose.yml")
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+ok() { printf '  ok    %s\n' "$*"; }
+warn() { printf '  WARN  %s\n' "$*"; problems=$((problems + 1)); }
+emulator_ready() { docker logs ha-companion-lab-emulator-1 2>&1 | tail -5 | grep -q -E '(^|[ |])ready\b'; }
+stack_pinned() {
+  env LAB_PIN_HA_URL="http://127.0.0.1:$LAB_HA_PORT" LAB_PIN_HA_TOKEN_FILE="$LAB_HA_DATA/token" \
+    LAB_PIN_TEST_USER_PASSWORD_FILE="$LAB_HA_DATA/test-user-password" "$@"
+}
+
+doctor() {
+  problems=0
+  if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok "KVM usable"; else warn "/dev/kvm is not usable by $(id -un) (kvm group or an ACL)"; fi
+  if docker info >/dev/null 2>&1; then ok "Docker reachable"; else warn "Docker is not reachable for $(id -un)"; fi
+  local adb_listen container_up=""
+  adb_listen=$(ss -ltn 2>/dev/null | awk '$4 ~ /:5037$/' | head -1)
+  docker inspect -f '{{.State.Running}}' ha-companion-lab-emulator-1 2>/dev/null | grep -q true && container_up=1
+  if [ -n "$adb_listen" ] && [ -z "$container_up" ]; then
+    warn "something listens on 5037 but the emulator container is not running: a host adb server? (adb kill-server)"
+  else ok "adb port 5037: $([ -n "$container_up" ] && echo "the container's" || echo free)"; fi
+  local free
+  free=$(df -Pk "$HOME" | awk 'NR == 2 {print int($4 / 1048576)}')
+  if [ "$free" -ge 10 ]; then ok "disk: $free GB free"; else warn "disk: only $free GB free (the SDK, images and AVD need about 10)"; fi
+  if docker image inspect ha-companion-lab-py >/dev/null 2>&1; then ok "image ha-companion-lab-py"; else warn "image ha-companion-lab-py missing: setup/build-images.sh"; fi
+  local pwv want
+  want=$(sed -E 's/.*playwright:v([0-9.]+).*/\1/' <<<"$PW_IMAGE")
+  pwv=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PW_NODE_MODULES/playwright-core/package.json" 2>/dev/null || true)
+  if [ "$pwv" = "$want" ]; then ok "playwright-core $pwv in PW_NODE_MODULES"; else warn "playwright-core ${pwv:-missing} in $PW_NODE_MODULES, the image is $want: lab playwright-install"; fi
+  # The GPU route (lab up --gpu, docs/gpu.md) needs the host's render node; informative only.
+  if [ -e /dev/dri/renderD128 ]; then
+    if [ -r /dev/dri/renderD128 ] && [ -w /dev/dri/renderD128 ]; then ok "render node /dev/dri/renderD128 usable (lab up --gpu possible, docs/gpu.md)"
+    else ok "render node /dev/dri/renderD128 present (group $(stat -c %G /dev/dri/renderD128)); the container gets it with that group"; fi
+  else ok "no render node: software rendering only (docs/gpu.md)"; fi
+  if [ -f "$LAB/lab.env" ]; then ok "lab.env present"; else ok "no lab.env: defaults only (copy lab.env.example to change any)"; fi
+  if [ -d "$AVENT_INTEGRATION_SRC/custom_components/philips_avent" ]; then ok "aventproxy checkout: the Avent add-on is on (LAB_AVENT=$LAB_AVENT)"; else ok "no aventproxy checkout: the lab's Home Assistant runs without the Avent add-on"; fi
+  [ "$problems" -eq 0 ] && echo "no problems found" || { echo "$problems problem(s)"; return 1; }
+}
+
+up() {
+  local own="" gpu="" bridge="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --own-ha) own=1 ;; --gpu) gpu=1 ;; --bridge) bridge=--bridge ;;
+      --avent) ;;  # older option: the lab's Home Assistant now always starts (Avent is an add-on)
+      *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+  done
+  if [ -z "$own" ]; then "$LAB/stack/stack.sh" up $bridge; fi
+  if [ -n "$gpu" ]; then
+    [ -e /dev/dri/renderD128 ] || { echo "no render node /dev/dri/renderD128" >&2; exit 1; }
+    RENDER_GID=$(stat -c %g /dev/dri/renderD128) EMULATOR_GPU=host \
+      "${COMPOSE[@]}" -f "$LAB/docker/compose.gpu.yml" up -d
+  else
+    "${COMPOSE[@]}" up -d
+  fi
+  echo "waiting for the emulator (first start: downloads and boot, minutes)..."
+  for _ in $(seq 180); do emulator_ready && break; sleep 5; done
+  emulator_ready || { echo "not ready after 15 min: ${COMPOSE[*]} logs emulator" >&2; exit 1; }
+  echo "ready: adb on 127.0.0.1:5037, the app's DevTools on 127.0.0.1:$CDP_PORT"
+  # The app's login (it lives in the emulator's avd volume). The app is started fresh: a WebView page
+  # means it is logged in; none, or no record of a login for this address, means log in (the test
+  # user, about two minutes). A Home Assistant that rejects the app's old login (e.g. a new lab HA
+  # on the same address) makes the app forget its server: this catches that too.
+  local mark
+  mark="$LAB_STATE_DIR/app-login-$(printf '%s' "$HA_URL_EMULATOR" | sha256sum | cut -c1-12)"
+  if [ ! -f "$mark" ] || ! fresh_app 2>/dev/null; then
+    echo "logging the app in to $HA_URL_EMULATOR as the test user (about two minutes)..."
+    if [ -z "$own" ]; then stack_pinned "$LAB/setup/app-login.sh" "$HA_URL_EMULATOR"
+    else "$LAB/setup/app-login.sh" "$HA_URL_EMULATOR"; fi
+    fresh_app >/dev/null && mkdir -p "$LAB_STATE_DIR" && touch "$mark" && echo "app logged in"
+  fi
+}
+
+status() {
+  local s
+  s=$(docker inspect -f '{{.State.Status}}' ha-companion-lab-emulator-1 2>/dev/null || echo absent)
+  echo "emulator container: $s$(emulator_ready 2>/dev/null && echo ', ready' || true)"
+  if [ "$s" = running ]; then
+    echo "app: pid $(app_pid || true)"
+    echo "renderer: $(docker exec ha-companion-lab-emulator-1 sh -c 'grep -m1 "Graphics Adapter Android" /data/out/emulator.log 2>/dev/null' | sed 's/.*Translator //' || echo '?')"
+    forward_devtools >/dev/null 2>&1 &&
+      echo "page: $(echo 'location.pathname' | "$LAB/tools/cdp.sh" 2>/dev/null || echo '?')"
+  fi
+  echo "lab Home Assistant: $(docker ps --filter name=^lab- --format '{{.Names}}' | tr '\n' ' ')"
+  echo "installed card build: $(cat "$LAB_STATE_DIR/card-build" 2>/dev/null || echo '(not set by the lab)')"
+  echo "test camera stream: $(cat "$LAB_STATE_DIR/test-camera-stream" 2>/dev/null || echo '(not set by the lab)')"
+  if docker ps --format '{{.Names}}' | grep -q '^lab-proxy$'; then
+    echo "test dashboard: $(stack_pinned "$LAB/video/ha-setup.sh" show 2>/dev/null || echo '?')"
+  fi
+}
+
+reset_state() {
+  docker ps --format '{{.Names}}' | grep -q '^lab-proxy$' ||
+    { echo "the lab's Home Assistant is not running (lab up)" >&2; exit 1; }
+  stack_pinned "$LAB/stack/stack.sh" card "$LAB_DEFAULT_BUILD"
+  stack_pinned "$LAB/video/ha-setup.sh" remove >/dev/null 2>&1 || true
+  stack_pinned "$LAB/video/ha-setup.sh" camera "$LAB_DEFAULT_STREAM"
+  stack_pinned "$LAB/video/ha-setup.sh" dashboard '{"camera_entity":"camera.test_pattern","live_provider":"ha"}'
+  fresh_app && echo "app restarted on the defaults"
+}
+
+playwright_install() {
+  local want
+  want=$(sed -E 's/.*playwright:v([0-9.]+).*/\1/' <<<"$PW_IMAGE")
+  mkdir -p "$(dirname "$PW_NODE_MODULES")"
+  # npm in a pinned node image, into the folder that holds PW_NODE_MODULES; no scripts run.
+  docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$(dirname "$PW_NODE_MODULES"):/w" -w /w \
+    node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 \
+    npm install --no-save --ignore-scripts --no-audit --no-fund --loglevel=error "playwright-core@$want" >/dev/null
+  [ "$(basename "$PW_NODE_MODULES")" = node_modules ] || echo "note: PW_NODE_MODULES should end in node_modules" >&2
+  echo "playwright-core $want in $PW_NODE_MODULES"
+}
+
+case "$cmd" in
+  doctor) doctor ;;
+  up) up "$@" ;;
+  status) status ;;
+  down)
+    "${COMPOSE[@]}" stop
+    [ "${1:-}" = --all ] && "$LAB/stack/stack.sh" down
+    ;;
+  shot) "$LAB/tools/emu.sh" shot "${1:-shot}" ;;
+  pip)
+    case "${1:-status}" in
+      on | off) app_pip "$1" ;;
+      status) ;;
+      *) echo "lab pip on|off|status" >&2; exit 2 ;;
+    esac
+    "$ADB" shell appops get "$PKG" PICTURE_IN_PICTURE </dev/null | sed 's/^/  /' ;;
+  key)
+    case "${1:-}" in
+      home | back | switcher | off | on | front) "$LAB/tools/emu.sh" "$1" ;;
+      *) echo "lab key home|back|switcher|off|on|front" >&2; exit 2 ;;
+    esac ;;
+  reset-state) reset_state ;;
+  playwright-install) playwright_install ;;
+  build) exec "$LAB/video/advanced-camera-card/build.sh" "$@" ;;
+  card) exec "$LAB/video/advanced-camera-card/card.sh" "$@" ;;
+  prof) exec "$LAB/tools/prof.sh" "$@" ;;
+  stack | avent) exec "$LAB/stack/stack.sh" "$@" ;;
+  help | -h | --help) sed -n '2,/^# Settings/p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "unknown command: $cmd (lab help)" >&2; exit 2 ;;
+esac

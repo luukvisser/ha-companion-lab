@@ -1,0 +1,5 @@
+# Installed with --require-hashes --no-deps (tools/cdp/Dockerfile): exact wheels for the pinned
+# python:3.13-alpine base, on x86_64 and on arm64 (Apple Silicon hosts).
+websockets==15.0.1 \
+    --hash=sha256:558d023b3df0bffe50a04e710bc87742de35060580a293c2a984299ed83bc4e4 \
+    --hash=sha256:229cf1d3ca6c1804400b0a9790dc66528e08a6a1feec0d5040e8b9eb14422375

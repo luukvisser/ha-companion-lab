@@ -1,0 +1,69 @@
+# Builds the lab's own container images when their files change, so a broken pin (an image digest,
+# the VirtualGL download's checksum, a package version) or a build step that no longer compiles
+# (docker/vglfix/vglfix.c) shows up on the pull request, not on someone's machine. Nothing is pushed
+# anywhere: the images are built and dropped.
+name: images
+
+on:
+  pull_request:
+    paths:
+      - docker/**
+      - tools/cdp/**
+      - stack/Dockerfile
+      - stack/requirements.txt
+      - stack/compose.yml
+      - .github/workflows/images.yml
+  push:
+    branches: [main]
+    paths:
+      - docker/**
+      - tools/cdp/**
+      - stack/Dockerfile
+      - stack/requirements.txt
+      - stack/compose.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The emulator's runtime: Ubuntu, Mesa, VirtualGL (by checksum), the vglfix shim.
+          - name: emulator
+            context: docker
+            dockerfile: docker/Dockerfile
+          # Python and websockets for the plain-CDP tools (setup/build-images.sh).
+          - name: cdp-py
+            context: tools/cdp
+            dockerfile: tools/cdp/Dockerfile
+          # The isolated stack's Home Assistant, derived from the upstream image pinned in its
+          # compose file (the HA_IMAGE build argument: read from there, one place to update).
+          - name: avent-ha
+            context: stack
+            dockerfile: stack/Dockerfile
+            ha_image_from: stack/compose.yml
+    name: build ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        env:
+          CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          NAME: ${{ matrix.name }}
+          HA_IMAGE_FROM: ${{ matrix.ha_image_from }}
+        run: |
+          args=()
+          if [ -n "$HA_IMAGE_FROM" ]; then
+            ha=$(grep -m1 -oE 'HA_IMAGE: [^ ]+' "$HA_IMAGE_FROM" | cut -d' ' -f2)
+            [ -n "$ha" ] || { echo "no HA_IMAGE in $HA_IMAGE_FROM"; exit 1; }
+            args=(--build-arg "HA_IMAGE=$ha")
+          fi
+          docker build --pull "${args[@]}" -f "$DOCKERFILE" -t "lab-ci-$NAME" "$CONTEXT"

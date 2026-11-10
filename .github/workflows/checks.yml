@@ -1,0 +1,24 @@
+# The checks every pull request must pass: the same tools/checks.sh as locally, in pinned containers
+# (shellcheck, bash -n under bash 5 and 3.2, Python compile and self-tests, node --check, yamllint,
+# the house-data check, links in the Markdown files).
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checks
+        run: tools/checks.sh

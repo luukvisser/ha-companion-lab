@@ -1,0 +1,74 @@
+# Example: boot the lab's emulator in CI (the Docker route) and check that Playwright sees it and
+# the Companion app runs. UNTESTED: written without a run on GitHub; see docs/host-route.md. Manual trigger
+# only, so it costs nothing until someone runs it.
+#
+# The Android SDK licence: a maintainer reads Google's text (setup/accept-sdk-licenses.sh prints
+# it and its SHA-1) and, only after accepting it, stores that SHA-1 as the repository variable
+# ANDROID_SDK_LICENSE_SHA1 (Settings > Secrets and variables > Actions > Variables). The job
+# refuses to download anything without it, and a changed licence text needs a new acceptance.
+name: Emulator smoke (example)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # GitHub's Linux runners have KVM, but only root may open it by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Record the maintainer's acceptance of the Android SDK licence
+        env:
+          ANDROID_SDK_ACCEPT_LICENCE_SHA1: ${{ vars.ANDROID_SDK_LICENSE_SHA1 }}
+        run: |
+          if [ -z "$ANDROID_SDK_ACCEPT_LICENCE_SHA1" ]; then
+            echo "::error::Set the repository variable ANDROID_SDK_LICENSE_SHA1 after reading and accepting the licence (see the header)."
+            exit 1
+          fi
+          docker compose -f docker/compose.yml build emulator
+          # Same SDK volume as the emulator below; the script only records a licence whose text
+          # has exactly this SHA-1.
+          docker compose -f docker/compose.yml run --rm -e ANDROID_SDK_ACCEPT_LICENCE_SHA1 \
+            --entrypoint /lab/setup/accept-sdk-licenses.sh emulator
+
+      - name: Start the emulator with the Companion app
+        run: |
+          adb kill-server 2>/dev/null || true
+          docker compose -f docker/compose.yml up -d
+          # First start downloads the SDK pieces and the image (a few GB), then boots.
+          # Wait for the ready line; stop early (and fail) when the container has exited.
+          timeout 1800 sh -c 'until docker compose -f docker/compose.yml logs emulator | grep -q "ready: adb"; do
+            if [ -z "$(docker compose -f docker/compose.yml ps -q --status running emulator)" ]; then
+              echo "the emulator container exited:"; docker compose -f docker/compose.yml logs emulator | tail -40; exit 1
+            fi
+            sleep 20
+          done'
+
+      - name: Playwright sees the device and the app
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright-core@1.62.0
+          cp lab.env.example lab.env
+          PW_NODE_MODULES="$RUNNER_TEMP/pw/node_modules" OUT_DIR="$RUNNER_TEMP/out" BUILDS_DIR="$RUNNER_TEMP/builds" \
+            tools/pwa.sh tools/playwright/devices.js
+
+      - name: Logs and screenshot
+        if: always()
+        run: |
+          docker compose -f docker/compose.yml logs emulator | tail -100
+          ls -la "$RUNNER_TEMP/out" 2>/dev/null || true
+
+      - name: Stop
+        if: always()
+        run: docker compose -f docker/compose.yml down

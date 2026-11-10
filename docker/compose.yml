@@ -1,0 +1,68 @@
+# The Android emulator with the Companion app in a container (the Docker route; docker/README.md).
+#
+#   docker compose -f docker/compose.yml up -d --build        # headless
+#   VIEWER=1 docker compose -f docker/compose.yml up -d       # watch: the URL in /data/viewer-url (README)
+#   docker compose -f docker/compose.yml logs -f emulator     # first start: downloads, boot
+#   docker compose -f docker/compose.yml stop                 # stops the emulator cleanly
+#
+# Linux with KVM only: Docker on macOS or Windows has no /dev/kvm (use the host route there).
+name: ha-companion-lab
+
+services:
+  emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ha-companion-lab-emulator:local
+    # Host networking: the container's adb server is the one on 127.0.0.1:5037 that the lab's
+    # tools (tools/pwa.sh, Playwright, tools/cdp.sh through $CDP_PORT) use, and the emulator's
+    # 10.0.2.2 is this machine, as on the host route. Stop a host adb server first
+    # (`adb kill-server`): two servers would fight over the emulator.
+    network_mode: host
+    devices:
+      - /dev/kvm
+    # A test tool: never back by itself after a reboot.
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 512m
+    stop_grace_period: 30s
+    environment:
+      - VIEWER=${VIEWER:-0}
+      - VIEWER_PORT=${VIEWER_PORT:-6080}
+      # LAB_MIC=1: the emulator's microphone hears only the lab's test tone (entrypoint.sh).
+      - LAB_MIC=${LAB_MIC:-0}
+      # EMULATOR_HW_DECODER=off (default): software video decoders in the guest, which WebRTC
+      # video needs (setup/start-emulator.sh); on: the emulator's own decoders.
+      - EMULATOR_HW_DECODER=${EMULATOR_HW_DECODER:-off}
+      # EMULATOR_GPU: the emulator's -gpu mode (default swiftshader_indirect, software). `host` needs
+      # the host's render node: add docker/compose.gpu.yml (`lab up --gpu`). EMULATOR_FEATURES: extra
+      # -feature flags, e.g. "-Vulkan".
+      - EMULATOR_GPU=${EMULATOR_GPU:-swiftshader_indirect}
+      - EMULATOR_FEATURES=${EMULATOR_FEATURES:-}
+      - EMULATOR_VGL=${EMULATOR_VGL:-0}
+      # LAB_REVERSE_PORTS: host ports the app reaches as localhost (adb reverse; default 8124).
+      - LAB_REVERSE_PORTS=${LAB_REVERSE_PORTS-8124}
+      # APP_PIP=on|off: picture-in-picture for the app (default on, Android's; `lab pip`).
+      - APP_PIP=${APP_PIP:-on}
+      # EMULATOR_AUDIO=silent: a sound card with no host sound (setup/start-emulator.sh).
+      - EMULATOR_AUDIO=${EMULATOR_AUDIO:-none}
+      # The lab's settings, from lab.env or the environment (see lab.env.example).
+      - API_LEVEL=${API_LEVEL:-37}
+      - AVD_NAME=${AVD_NAME:-ha-companion-lab}
+      - COMPANION_VERSION=${COMPANION_VERSION:-2026.11.1}
+      - PKG=${PKG:-io.homeassistant.companion.android.minimal}
+      - CDP_PORT=${CDP_PORT:-9333}
+    volumes:
+      # The repository, so the container runs the same scripts as the host route.
+      - ..:/lab:ro
+      # SDK pieces, system image and APK: downloaded once.
+      - sdk:/opt/android-sdk
+      # The AVD, including the app's data: the login survives a restart of the container.
+      - avd:/root/.android
+      - data:/data
+
+volumes:
+  sdk:
+  avd:
+  data:

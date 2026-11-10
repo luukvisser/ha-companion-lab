@@ -1,0 +1,27 @@
+# The synthetic test camera (see mediamtx.yml). Start only when testing: no restart policy.
+#
+# TESTSTREAM_BIND decides who can read it: 127.0.0.1 (default) when Home Assistant runs on this
+# machine with host networking; this machine's LAN address when Home Assistant runs elsewhere
+# (e.g. Home Assistant OS on another box). The stream carries nothing private either way.
+services:
+  teststream:
+    container_name: lab-teststream
+    # MediaMTX with ffmpeg, pinned by digest in lab.env.example (LAB_MEDIAMTX_IMAGE).
+    image: ${LAB_MEDIAMTX_IMAGE:?start it with video/teststream/teststream.sh up}
+    restart: "no"
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["/config/mediamtx.yml"]
+    cpus: 1.0
+    mem_limit: 512m
+    volumes:
+      - ./mediamtx.yml:/config/mediamtx.yml:ro
+    ports:
+      # Host port 18554, not 8554: the Android emulator listens on 127.0.0.1:8554 (its gRPC port).
+      - ${TESTSTREAM_BIND:-127.0.0.1}:${TESTSTREAM_PORT:-18554}:8554/tcp

@@ -1,0 +1,118 @@
+# The lab's own Home Assistant: a throwaway, isolated test HA with go2rtc and the synthetic test
+# stream. Started and set up by stack.sh (`./lab up`); see README.md. The Philips Avent add-on (a
+# fake Tuya API, the integration, a simulated bridge) comes from compose.avent.yml.
+#
+# Networks:
+# - `lab` is internal: no internet and nothing of any other stack. Home Assistant, go2rtc and the
+#   test stream (and the Avent add-on's services) talk only there.
+# - `edge` carries only what this machine must reach: the proxy in front of HA (127.0.0.1:8124,
+#   reached from the emulator as localhost:8124 through adb reverse) and go2rtc's WebRTC media
+#   (127.0.0.1:8557).
+#
+# Nothing restarts by itself: a test tool, not a service.
+
+name: ha-companion-lab-stack
+
+x-hardened: &hardened
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+  # A lower CPU share than other containers (default 1024), so the stack yields to measurements.
+  cpu_shares: 256
+
+services:
+  homeassistant:
+    <<: *hardened
+    image: ha-companion-lab-ha:2026.11.0
+    build:
+      context: .
+      args:
+        # The Home Assistant release this lab is tested with (2026.11.0), pinned by digest.
+        HA_IMAGE: ghcr.io/home-assistant/home-assistant:2026.11.0@sha256:c6c1ca9931036bf3a2c4cc088d8db25dfea3b33935a5ecc83c40349462e2f69e
+    container_name: lab-ha
+    # A test HA, not a production one: kept small next to other work on the machine.
+    cpus: 1.0
+    mem_limit: 1536m
+    environment:
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ${LAB_HA_DATA}/ha:/config
+    networks:
+      lab:
+        ipv4_address: 172.31.240.3
+    depends_on:
+      - go2rtc
+
+  go2rtc:
+    <<: *hardened
+    # go2rtc at Home Assistant's recommended version, pinned by digest.
+    image: ${LAB_GO2RTC_IMAGE:?run through stack.sh (lab.env.example pins it)}
+    container_name: lab-go2rtc
+    # Docker's resolver forwards outside names to this address in the container, where nothing
+    # listens: only the stack's own names resolve.
+    dns: [127.0.0.1]
+    read_only: true
+    tmpfs:
+      - /tmp
+    # go2rtc writes every stream Home Assistant registers into its config file and answers 400
+    # ("read-only file system") when it cannot; that failed HA's WebRTC offer and left the card
+    # on HLS (10-11-2026). So it runs on a copy in its tmpfs; the source stays read-only.
+    entrypoint: ["sh", "-c", "cp /config/go2rtc.yaml /tmp/go2rtc.yaml && exec go2rtc -config /tmp/go2rtc.yaml"]
+    command: []
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+    ports:
+      - "127.0.0.1:${LAB_WEBRTC_PORT:-8557}:8557/tcp"
+      - "127.0.0.1:${LAB_WEBRTC_PORT:-8557}:8557/udp"
+    networks:
+      lab:
+        ipv4_address: 172.31.240.4
+      edge: {}
+
+  teststream:
+    <<: *hardened
+    image: ${LAB_MEDIAMTX_IMAGE:?run through stack.sh (lab.env.example pins it)}
+    container_name: lab-teststream
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+    command: ["/config/mediamtx.yml"]
+    volumes:
+      - ../video/teststream/mediamtx.yml:/config/mediamtx.yml:ro
+    networks:
+      lab:
+        ipv4_address: 172.31.240.5
+
+  proxy:
+    <<: *hardened
+    image: ha-companion-lab-ha:2026.11.0
+    container_name: lab-proxy
+    # Docker's resolver forwards outside names to this address in the container, where nothing
+    # listens: only the stack's own names resolve.
+    dns: [127.0.0.1]
+    entrypoint: ["python3", "-I", "/app/proxy.py", "8123", "172.31.240.3", "8123"]
+    read_only: true
+    volumes:
+      - ./proxy.py:/app/proxy.py:ro
+    ports:
+      - "127.0.0.1:${LAB_HA_PORT:-8124}:8123"
+    networks:
+      # Fixed, like every service on `lab`: a dynamic address could take the bridge's.
+      lab:
+        ipv4_address: 172.31.240.20
+      edge: {}
+
+networks:
+  lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+  # The only network with published ports (the proxy's HA port and go2rtc's WebRTC). Port
+  # publishing needs a non-internal network, so outbound traffic is cut another way: no NAT
+  # (masquerade off), so nothing from here reaches the internet, and the services on it resolve no
+  # outside names (dns below).
+  edge:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

@@ -1,0 +1,6 @@
+# Installed with --require-hashes --no-deps (Dockerfile): tinytuya and the one dependency the pinned
+# Home Assistant image lacks (colorama); requests and cryptography come with Home Assistant.
+tinytuya==1.20.0 \
+    --hash=sha256:ac5650c30f1153b1eae0b8d75f67043fb2397a168d3834e47da2d88d2c08c722
+colorama==0.4.6 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6

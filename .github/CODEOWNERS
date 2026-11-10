@@ -1,0 +1,4 @@
+# Review is requested from the owner for every change (GitHub CODEOWNERS). The lab drives a real
+# Home Assistant login and pins every image and download: changes to setup/, docker/, lib.sh,
+# defaults.env and the security notes deserve the closest look.
+* @luukvisser

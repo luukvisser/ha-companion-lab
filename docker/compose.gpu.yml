@@ -1,0 +1,18 @@
+# GPU rendering through the host's render node (opt-in, `lab up --gpu`; measured 10-11-2026 in
+# docker/README.md): add this file to the compose command, with RENDER_GID set to the node's group:
+#
+#   RENDER_GID=$(stat -c %g /dev/dri/renderD128) EMULATOR_GPU=host \
+#     docker compose -f docker/compose.yml -f docker/compose.gpu.yml up -d
+#
+# A render node draws off-screen; it does not touch the display. The GPU is shared with the
+# desktop, though. Back to software rendering: start without this file (and without EMULATOR_GPU).
+services:
+  emulator:
+    devices:
+      - /dev/dri/renderD128
+    environment:
+      # GLX (the emulator's GL renderer on Linux) through VirtualGL on the render node, on a
+      # private X display the entrypoint starts (measured 10-11-2026: "Mesa Intel(R) Graphics").
+      - EMULATOR_VGL=1
+    group_add:
+      - "${RENDER_GID:?set RENDER_GID to the group of /dev/dri/renderD128}"

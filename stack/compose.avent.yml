@@ -1,0 +1,73 @@
+# The Philips Avent add-on to the lab's Home Assistant (compose.yml): a fake Tuya API, the
+# integration (copied at `up` from an aventproxy checkout into the data folder: third-party code,
+# never in the repository) and, opt-in, the simulated bridge. stack.sh adds this file when the add-on
+# is on (LAB_AVENT, default: on when an aventproxy checkout is present).
+#
+# Home Assistant resolves the Tuya API host names to the fake (extra_hosts), so even a misconfigured
+# request cannot reach the real cloud, and trusts the lab CA the fake's certificate is signed with.
+
+x-fake-hosts: &fake-hosts
+  - "a1.tuyaeu.com:172.31.240.10"
+  - "a1.tuyaus.com:172.31.240.10"
+  - "a1.tuyain.com:172.31.240.10"
+  - "a1.tuyacn.com:172.31.240.10"
+
+x-hardened: &hardened
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+  cpu_shares: 256
+
+services:
+  homeassistant:
+    environment:
+      # Trust the lab CA (and the usual roots) for HA's own client and for plain aiohttp sessions.
+      - REQUESTS_CA_BUNDLE=/lab-ca/bundle.pem
+      - SSL_CERT_FILE=/lab-ca/bundle.pem
+    extra_hosts: *fake-hosts
+    volumes:
+      - ${LAB_HA_DATA}/certs/bundle.pem:/lab-ca/bundle.pem:ro
+      - ${LAB_HA_DATA}/avent-integration/philips_avent:/config/custom_components/philips_avent:ro
+    depends_on:
+      - fake-tuya
+
+  fake-tuya:
+    <<: *hardened
+    image: ha-companion-lab-ha:2026.11.0
+    container_name: lab-fake-tuya
+    entrypoint: ["python3", "-I", "/app/fake_tuya.py"]
+    read_only: true
+    environment:
+      - FAKE_TUYA_CERT=/certs/tuya.pem
+      - FAKE_TUYA_DEVICE_NAME=${AVENT_LAB_CAMERA_NAME:-Lab baby monitor}
+      - FAKE_TUYA_KEY=/certs/tuya.key
+    volumes:
+      - ./fake_tuya.py:/app/fake_tuya.py:ro
+      - ${LAB_HA_DATA}/certs/tuya.pem:/certs/tuya.pem:ro
+      - ${LAB_HA_DATA}/certs/tuya.key:/certs/tuya.key:ro
+    networks:
+      lab:
+        ipv4_address: 172.31.240.10
+
+  # The simulated bridge: aventproxy's camera-free mode (`avent-webrtc-bridge sim`), built
+  # separately from an aventproxy checkout as avent-bridge:sim. Opt-in: `stack.sh up --bridge`.
+  # It serves the camera the fake Tuya API reports, under the same name, so the RTSP URL the
+  # integration builds (rtsp://172.31.240.2:38554/<name>) matches; media from the test stream.
+  bridge:
+    <<: *hardened
+    image: avent-bridge:sim
+    profiles: ["bridge"]
+    container_name: lab-bridge
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      # The simulator's own guard: it refuses to start without it.
+      - AVENTPROXY_SIMULATION=i-understand-this-serves-fake-cameras
+      - SIM_NAMES=${AVENT_LAB_CAMERA_NAME:-Lab baby monitor}
+      - SIM_SOURCE=${AVENT_LAB_SIM_SOURCE:-rtsp://172.31.240.5:8554/baby}
+      - SIM_BIND=172.31.240.2
+      - SIM_TALK_DIR=/tmp/talk
+    networks:
+      lab:
+        ipv4_address: 172.31.240.2

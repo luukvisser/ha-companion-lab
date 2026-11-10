@@ -1,0 +1,19 @@
+# Local settings (copy of lab.env.example)
+lab.env
+# Results and builds, if pointed inside the repository
+out/
+builds/
+# Notes for the owner only (not for sharing)
+NOTES-for-Luuk.md
+# Python bytecode
+__pycache__/
+# Safety net: generated secrets, data folders and recordings if pointed inside the repository
+data/
+*.pem
+*.key
+*-password
+*-token
+*.mp4
+*.ulaw
+*.alaw
+*.wav
