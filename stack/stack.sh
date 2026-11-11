@@ -173,7 +173,7 @@ up() {
   stack_env "$LAB_ROOT/setup/ha-test-user.sh" create
   # The generic test camera on the synthetic stream, and the test dashboard on it. (With the Avent
   # add-on its simulated camera is there too: `video/ha-setup.sh dashboard` points the card at it.)
-  stack_env "$LAB_ROOT/video/ha-setup.sh" camera "rtsp://172.31.240.5:8554/pattern_video"
+  stack_env "$LAB_ROOT/video/ha-setup.sh" camera "$LAB_DEFAULT_STREAM"
   # The Advanced Camera Card once a build is installed (`stack.sh card`, `lab card`); before that Home
   # Assistant's own camera card, live, so a fresh lab shows the stream at once.
   if docker run --rm -v "$LAB_HA_DATA/ha:/config:ro" --entrypoint sh "$IMAGE" -c \

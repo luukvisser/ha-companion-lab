@@ -26,7 +26,7 @@ docker/compose.yml down -v` removes it with the downloads.
 ## Settings (on the `up` command)
 
 `EMULATOR_HW_DECODER` (default `off`: WebRTC video needs the guest's software decoders),
-`EMULATOR_AUDIO` (`none`, or `silent` for video with sound), `EMULATOR_GPU`, `APP_PIP`,
+`EMULATOR_AUDIO` (`silent`, or `none` for no sound card), `EMULATOR_GPU`, `APP_PIP`,
 `LAB_MIC=1` (the lab microphone: a 1 kHz test tone), `VIEWER=1` (watch it in a browser). All of
 them: [docs/settings.md](../docs/settings.md).
 

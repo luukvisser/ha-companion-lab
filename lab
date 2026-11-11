@@ -42,7 +42,13 @@ cmd=${1:-help}
 
 ok() { printf '  ok    %s\n' "$*"; }
 warn() { printf '  WARN  %s\n' "$*"; problems=$((problems + 1)); }
-emulator_ready() { docker logs ha-companion-lab-emulator-1 2>&1 | tail -5 | grep -q -E '(^|[ |])ready\b'; }
+# Only this start's log: `lab down` stops the container and keeps its log, whose last lines (the
+# previous run's "ready") would otherwise count before the new boot is done.
+emulator_ready() {
+  local since
+  since=$(docker inspect -f '{{.State.StartedAt}}' ha-companion-lab-emulator-1 2>/dev/null) || return 1
+  docker logs --since "$since" ha-companion-lab-emulator-1 2>&1 | tail -5 | grep -q -E '(^|[ |])ready\b'
+}
 stack_pinned() {
   env LAB_PIN_HA_URL="http://127.0.0.1:$LAB_HA_PORT" LAB_PIN_HA_TOKEN_FILE="$LAB_HA_DATA/token" \
     LAB_PIN_TEST_USER_PASSWORD_FILE="$LAB_HA_DATA/test-user-password" "$@"

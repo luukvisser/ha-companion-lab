@@ -40,7 +40,7 @@ settings are read when the emulator container starts (`docker/compose.yml`): set
 | Setting | Default | What |
 |---|---|---|
 | `EMULATOR_HW_DECODER` | `off` | `off`: the guest's software video decoders, which WebRTC video needs; `on`: the emulator's own |
-| `EMULATOR_AUDIO` | `none` | `none` (`-no-audio`; the WebView crashed once WebRTC audio started), `silent` (a sound card without host sound: use this for video with sound) |
+| `EMULATOR_AUDIO` | `silent` | `silent` (a sound card without host sound: pages play the test stream's audio, nothing is heard), `none` (no sound card, `-no-audio`) |
 | `EMULATOR_GPU` | `swiftshader_indirect` | the `-gpu` mode; `lab up --gpu` sets `host` with `docker/compose.gpu.yml` (docs/gpu.md) |
 | `EMULATOR_VGL` | `0` | `1` (set by `docker/compose.gpu.yml`): run the emulator under VirtualGL with `vglfix.so` |
 | `EMULATOR_FEATURES` | none | extra `-feature` flags, space-separated (e.g. `-Vulkan`) |
@@ -87,5 +87,5 @@ To use your own Home Assistant instead, set `HA_URL`, `HA_URL_EMULATOR`, `HA_TOK
 | `LAB_AVENT` | `auto` | the Philips Avent add-on: `on`, `off`, or `auto` (on when an aventproxy checkout is at `AVENT_INTEGRATION_SRC`) |
 | `AVENT_INTEGRATION_SRC`, `AVENT_INTEGRATION_REF` | `~/aventproxy`, `origin/main` | where the integration is copied from (`WORKTREE`: the files as they are) |
 | `AVENT_LAB_SIM_SOURCE`, `AVENT_LAB_CAMERA_NAME` | the test stream's `baby` path, `Lab baby monitor` | the simulated camera |
-| `LAB_DEFAULT_BUILD`, `LAB_DEFAULT_STREAM` | `main`, the test stream's `pattern_video` | what `lab reset-state` restores |
+| `LAB_DEFAULT_BUILD`, `LAB_DEFAULT_STREAM` | `main`, the test stream's `pattern_pcma` (with audio) | the test camera's stream at `lab up`, and what `lab reset-state` restores |
 | `LAB_PIN_HA_URL`, `LAB_PIN_HA_TOKEN_FILE`, `LAB_PIN_TEST_USER_PASSWORD_FILE` | none | set by the lab itself (all three or none): every write to Home Assistant goes to the pinned one; `lab.env` cannot set or change them (lib.sh) |
