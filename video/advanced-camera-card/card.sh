@@ -24,8 +24,20 @@
 #                                      against an idle window (tools/prof.sh cov)
 #   loading <builds> [rounds]          the loading indicator against the picture under it, from the
 #                                      first load and on returns (playwright/loading-overlap.js)
-#   doubletap <builds> [gaps] [rounds] double tap after a pinch: back to the default zoom?
-#                                      (playwright/doubletap.js)
+#   doubletap <builds> [doubles]       zoomed in by a ptz_digital action, then Chrome's synthesized
+#                                      double taps: back to the default zoom? the gap each time as
+#                                      the page saw it (cdp/doubletap.py)
+#   menu <builds> [rounds] [nav|bg]    the menu's buttons on every frame after a return to the test
+#                                      dashboard (nav) or from the background (bg): how often the
+#                                      layout changes (cdp/menu_watch.py)
+#   taps <builds> [rounds] [loading|playing] [targets]
+#                                      menu buttons tapped while the media loads (or, as control,
+#                                      while it plays): what the tap reached, the action the card ran,
+#                                      fullscreen requests (cdp/menu_taps.py; TAP_AFTER)
+#   config <builds> <dashboard.yaml> [camera]
+#                                      every camera card in a dashboard YAML file, on the test camera
+#                                      (or [camera]) in turn: loads without a configuration error? its
+#                                      menu (cdp/config_check.py)
 #   bg-rounds|bg-shots|bg-video <builds> [rounds]
 #                                      background and return (see their own headers)
 #   fullscreen <builds> [rounds] [api|back|swipe] [expanded 0|1]
@@ -43,7 +55,7 @@ if [ -z "${LAB_PINNED_HA_URL:-}" ]; then
     LAB_PIN_HA_TOKEN_FILE="$LAB_HA_DATA/token" \
     LAB_PIN_TEST_USER_PASSWORD_FILE="$LAB_HA_DATA/test-user-password" "$0" "$@"
 fi
-what=${1:?usage: card.sh <blip|blip-interrupt|call|call-cut|mute-cycles|cov|loading|doubletap|bg-rounds|bg-shots|bg-video|fullscreen> <builds> [args]}
+what=${1:?usage: card.sh <blip|blip-interrupt|call|call-cut|mute-cycles|cov|loading|doubletap|menu|taps|config|bg-rounds|bg-shots|bg-video|fullscreen> <builds> [args]}
 builds=${2:?give one or more build names under $BUILDS_DIR, comma-separated}
 shift 2
 FS="window.__covCard = ((t) => { const w = (r) => { for (const el of r.querySelectorAll('*')) { if (el.tagName.toLowerCase() === t) return el; if (el.shadowRoot) { const f = w(el.shadowRoot); if (f) return f; } } return null; }; return w(document); })('advanced-camera-card'); window.__covCard._controller.getFullscreenManager().setFullscreen(true)"
@@ -121,10 +133,59 @@ for b in "${list[@]}"; do
     doubletap)
       write_meta "doubletap-$b" "$b"
       fresh_app
-      lab_py /lab/tools/cdp/prof.py act -j "$GOTO" >/dev/null
-      sleep 20
-      "$LAB_ROOT/tools/pwa.sh" video/advanced-camera-card/playwright/doubletap.js "${1:-single,100,200,280,400}" "${2:-3}" |
-        tee "$OUT_DIR/doubletap-$b.txt" ;;
+      lab_py /lab/video/advanced-camera-card/cdp/doubletap.py "$b" "${1:-8}" | tee "$OUT_DIR/doubletap-$b.txt" ;;
+    menu)
+      way=${2:-nav}
+      write_meta "menu-watch-$b-$way" "$b"
+      fresh_app
+      lab_py /lab/video/advanced-camera-card/cdp/menu_watch.py "$b" "${1:-3}" "$way" 2>&1 |
+        while IFS= read -r line; do
+          case "$line" in
+            "HOSTACT leave-"*) w=${line#HOSTACT leave-}; leave_app "${w%% *}"; echo "${line##* }" >"$OUT_DIR/host-done" ;;
+            "HOSTACT return-"*) w=${line#HOSTACT return-}; return_app "${w%% *}"; echo "${line##* }" >"$OUT_DIR/host-done" ;;
+            *) echo "$line" ;;
+          esac
+        done | tee "$OUT_DIR/menu-watch-$b-$way.txt" ;;
+    taps)
+      write_meta "menu-taps-$b" "$b"
+      fresh_app
+      lab_py /lab/video/advanced-camera-card/cdp/menu_taps.py "$b" "${1:-2}" "${2:-loading}" "${3:-}" |
+        tee "$OUT_DIR/menu-taps-$b.txt" ;;
+    config)
+      file=${1:?give a dashboard YAML file}
+      camera=${2:-camera.test_pattern}
+      # Every advanced-camera-card in the file, parsed by the lab's Home Assistant (unknown tags
+      # such as !secret or !include are read as null), with the cameras pointed at the lab camera
+      # (one camera per card) and any visibility condition dropped (it would refer to the house's
+      # entities).
+      cards=$(docker exec -i lab-ha python3 -I -c '
+import json, sys, yaml
+class L(yaml.SafeLoader): pass
+L.add_multi_constructor("!", lambda loader, suffix, node: None)
+found = []
+def walk(o):
+    if isinstance(o, dict):
+        if o.get("type") == "custom:advanced-camera-card":
+            found.append(o); return
+        for v in o.values(): walk(v)
+    elif isinstance(o, list):
+        for v in o: walk(v)
+walk(yaml.load(sys.stdin, Loader=L))
+for c in found:
+    c.pop("visibility", None)
+    c["cameras"] = [dict(cam, camera_entity=sys.argv[1]) for cam in c.get("cameras", [])][:1]
+    print(json.dumps(c))
+' "$camera" <"$file")
+      [ -n "$cards" ] || { echo "no advanced-camera-card in $file" >&2; exit 1; }
+      n=0
+      # The list on its own descriptor: adb (fresh_app) reads stdin and would eat the rest.
+      while IFS= read -r card <&3; do
+        n=$((n + 1))
+        "$LAB_ROOT/video/ha-setup.sh" dashboard-card "$card" >/dev/null
+        write_meta "config-$b-$n" "$b"
+        fresh_app
+        lab_py /lab/video/advanced-camera-card/cdp/config_check.py "$b-card$n" || true
+      done 3<<<"$cards" ;;
     bg-rounds | bg-shots | bg-video)
       write_meta "$what-$b" "$b"
       fresh_app

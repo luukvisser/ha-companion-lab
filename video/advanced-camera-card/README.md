@@ -32,7 +32,10 @@ video/ha-setup.sh dashboard '{"camera_entity":"camera.test_pattern","live_provid
 | `call-cut <builds> [cut s]` | a call while the app's connection to Home Assistant is cut and restored |
 | `cov <builds> [rounds]` | calls into the card's functions while entering fullscreen; exact counts |
 | `loading <builds> [rounds]` | when the loading indicator appears and fades, first image, first playing video |
-| `doubletap <builds> [gaps] [rounds]` | a pinch, then a double tap: back to the default zoom? |
+| `doubletap <builds> [doubles]` | zoomed in by a `ptz_digital` action, then Chrome's synthesized double taps: back to the default zoom? The gap each time as the page saw it |
+| `menu <builds> [rounds] [nav\|bg]` | the menu's buttons on every frame after a return (to the dashboard, or from the background): how often the layout changes |
+| `taps <builds> [rounds] [loading\|playing] [targets]` | menu buttons tapped while the media loads: what the tap reached, the action the card ran, fullscreen requests |
+| `config <builds> <dashboard.yaml> [camera]` | every camera card in a dashboard file, on the test camera: loads without a configuration error? its menu |
 | `mute-cycles <builds> [cycles] [toggle\|back\|swipe\|bg\|switcher\|off]` | the mute state after fullscreen and trips out of the app |
 | `bg-rounds\|bg-shots\|bg-video <builds> [rounds]` | app to the background and back (`LEAVE=home\|switcher\|off`): page log, rated screenshots, or a rated screen recording |
 | `fullscreen <builds> [rounds] [api\|back\|swipe]` | entering/leaving fullscreen per animation frame |
@@ -53,8 +56,12 @@ white card, the stored frame with its time, then live video.*
 - **Emulator timings are not a phone's.** Reading a video frame from a canvas costs far more in the
   emulator under software rendering than on phones; frame counts (`BLIP_FRAMES=1`) are only useful
   with `--gpu`. Do not base a performance decision on the emulator alone.
-- **Zoom tests need a real pinch** (`playwright/pinch.js`, `PINCH=1`): setting the zoom directly is
-  not what a user does.
+- **Taps and pinches are slow to inject.** Each CDP touch event is a round trip to the emulator: a
+  50 ms tap sent as touchStart/touchEnd reached the page as 200-290 ms, its gaps longer by about as
+  much (11-11-2026), and a scripted pinch often does not zoom. For anything timed, use Chrome's own
+  `Input.synthesizeTapGesture` (`tapCount: 2` for a double tap) and log in the page what it saw.
+  Where the zoom is only the starting point, set it with the card's `ptz_digital` action; where the
+  pinch itself is under test, use `playwright/pinch.js` (`PINCH=1`) and check that it took.
 - **Compare served builds with each other**, not with a deployed card that carries other changes.
 
 Self-tests: `tools/bg_summary.py --self-test` and `tools/rate_frames.py --self-test` (in
