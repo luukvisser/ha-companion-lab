@@ -45,8 +45,9 @@ services:
       - LAB_REVERSE_PORTS=${LAB_REVERSE_PORTS-8124}
       # APP_PIP=on|off: picture-in-picture for the app (default on, Android's; `lab pip`).
       - APP_PIP=${APP_PIP:-on}
-      # EMULATOR_AUDIO=silent: a sound card with no host sound (setup/start-emulator.sh).
-      - EMULATOR_AUDIO=${EMULATOR_AUDIO:-none}
+      # EMULATOR_AUDIO=silent: a sound card with no host sound; none: no sound card
+      # (setup/start-emulator.sh).
+      - EMULATOR_AUDIO=${EMULATOR_AUDIO:-silent}
       # The lab's settings, from lab.env or the environment (see lab.env.example).
       - API_LEVEL=${API_LEVEL:-37}
       - AVD_NAME=${AVD_NAME:-ha-companion-lab}

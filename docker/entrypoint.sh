@@ -53,6 +53,10 @@ for db in /tmp/android-*/emu-crash-*.db; do
   [ -s "$db" ] && mkdir -p /data/out/crash && cp -a "$db" "/data/out/crash/$(date +%Y%m%d-%H%M%S)-$(basename "$db")"
 done
 rm -rf /tmp/android-* /tmp/.X*-lock /tmp/.X11-unix/X* /tmp/lab-x /tmp/lab-vnc
+# The AVD's locks too: no emulator runs yet in this container, so any lock is a previous run's. One
+# left by an emulator stopped during its boot made the next start fail ("Running multiple emulators
+# with the same AVD"), while the container kept running (11-11-2026).
+rm -f "$HOME/.android/avd/"*.avd/*.lock
 
 setup/install-sdk.sh
 [ -f "$HOME/.android/avd/${AVD_NAME:-ha-companion-lab}.ini" ] || setup/create-avd.sh

@@ -35,17 +35,17 @@ else
   # bash before 4.4, and macOS ships bash 3.2.
   window=""
   [ "${1:-}" = "--no-window" ] && window="-no-window"
-  # Audio: off unless EMULATOR_AUDIO=lab-mic, which gives the emulator a microphone that hears only
-  # the lab's virtual source (docker/entrypoint.sh, LAB_MIC=1). Refused without a lab Pulse server,
-  # so the host's real microphone can never be the emulator's.
+  # Audio. EMULATOR_AUDIO=silent (the default): the guest keeps its sound card, the emulator gives it
+  # no host sound (QEMU_AUDIO_DRV=none): nothing is heard or recorded, but a page that plays sound
+  # has a device (the test stream has audio). `none`: no sound card (-no-audio). `lab-mic`: a
+  # microphone that hears only the lab's virtual source (docker/entrypoint.sh, LAB_MIC=1); refused
+  # without a lab Pulse server, so the host's real microphone can never be the emulator's.
   audio="-no-audio"
-  # EMULATOR_AUDIO=silent: the guest keeps its sound card, the emulator gives it no host sound
-  # (QEMU_AUDIO_DRV=none): nothing is heard or recorded, but a page that plays sound has a device.
-  if [ "${EMULATOR_AUDIO:-none}" = silent ]; then
+  if [ "${EMULATOR_AUDIO:-silent}" = silent ]; then
     audio=""
     export QEMU_AUDIO_DRV=none
   fi
-  if [ "${EMULATOR_AUDIO:-none}" = lab-mic ]; then
+  if [ "${EMULATOR_AUDIO:-silent}" = lab-mic ]; then
     lab_pulse_ok || exit 1
     audio="-allow-host-audio"
     # No fallback to another server: libpulse looks for one in its runtime folder when the given one

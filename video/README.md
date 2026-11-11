@@ -26,8 +26,8 @@ tools/pwa.sh video/playwright/dashlive.js     # opens the dashboard in the app, 
 | Path | Video | Audio |
 |---|---|---|
 | `pattern` | H.264 1280×720 15 fps | AAC 16 kHz, a beeping 440 Hz tone |
-| `pattern_video` | same | none (the lab's default) |
-| `pattern_pcma` | same | G.711 A-law 8 kHz |
+| `pattern_video` | same | none |
+| `pattern_pcma` | same | G.711 A-law 8 kHz, a beeping tone (the lab's default) |
 | `pattern_h265` | H.265 1280×720 15 fps | none |
 | `baby`, `doorbell` | see [audio/](audio/README.md) | |
 | `sync`, `sync_aac` | 30 fps with a time code, for `tools/av-delay.sh` | G.711 / AAC with a beep each second |
