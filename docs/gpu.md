@@ -27,7 +27,9 @@ a GPU. **VirtualGL** (in the image) gives the emulator GLX on a private virtual 
 rendering on the host's render node. VirtualGL 3.1.5 returns 1 instead of 0 from
 `glXGetFBConfigAttrib()` for the three pbuffer-size attributes (its EGL back end), which made the
 emulator reject every framebuffer config; **`docker/vglfix/vglfix.c`**, built into the image and
-loaded first, turns that 1 into 0 for those attributes only. Files: `docker/compose.gpu.yml`,
+loaded first, turns that 1 into 0 for those attributes only. Reported upstream as
+[VirtualGL#292](https://github.com/VirtualGL/virtualgl/issues/292); the shim can go once a release
+fixes it. Files: `docker/compose.gpu.yml`,
 `docker/Dockerfile`, `docker/vglfix/`, `setup/start-emulator.sh`.
 
 If the emulator crashes on this route, its core dump is in the `sdk` volume
