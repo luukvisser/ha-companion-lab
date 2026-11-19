@@ -16,7 +16,7 @@ import sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else "."
 SKIP_DIRS = {".git", "__pycache__", "node_modules"}
-SKIP_FILES = {"NOTES-for-Luuk.md", "lab.env"}
+SKIP_FILES = {"NOTES-for-Luuk.md", "lab.env", ".git"}  # .git: a worktree's pointer file
 ALLOWED_IPS = re.compile(r"^(10\.0\.2\.\d+|172\.17\.0\.1|172\.31\.240\.\d+|127\.\d+\.\d+\.\d+|0\.0\.0\.0|10\.0\.0\.5)$")
 PRIVATE_IP = re.compile(r"\b(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)\b")
 CHECKS = {
@@ -28,6 +28,8 @@ CHECKS = {
 }
 LONG_HEX = re.compile(r"(?<![0-9a-fA-F])[0-9a-f]{32,}(?![0-9a-fA-F])")
 CHECKSUM_CONTEXT = re.compile(r"sha(1|256)|digest|@sha|checksum|SHA|uses:", re.I)
+# A gitleaks fingerprint in .gitleaksignore (commit:file:rule:line): a commit hash, not house data.
+GITLEAKS_FINGERPRINT = re.compile(r"^[0-9a-f]{40}:[^:\s]+:[a-z0-9-]+:\d+$")
 EMAIL_OK = re.compile(r"noreply@anthropic\.com|users\.noreply\.github\.com|@example\.(com|org)|\.invalid$|\.example$")
 
 extra = []
@@ -58,7 +60,8 @@ for dirpath, dirnames, filenames in os.walk(ROOT):
                 m = rx.search(line)
                 if m and not (label == "e-mail" and EMAIL_OK.search(m.group(0))):
                     findings.append(f"{rel}:{n}: {label}")
-            if LONG_HEX.search(line) and not CHECKSUM_CONTEXT.search(line):
+            if LONG_HEX.search(line) and not CHECKSUM_CONTEXT.search(line) and not (
+                    name == ".gitleaksignore" and GITLEAKS_FINGERPRINT.match(line)):
                 findings.append(f"{rel}:{n}: long hex string without a checksum label")
             for rx in extra:
                 if rx.search(line):

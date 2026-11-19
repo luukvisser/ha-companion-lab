@@ -1,24 +1,50 @@
 # The checks every pull request must pass: the same tools/checks.sh as locally, in pinned containers
 # (shellcheck, bash -n under bash 5 and 3.2, Python compile and self-tests, node --check, yamllint,
-# the house-data check, links in the Markdown files).
+# the house-data check, links in the Markdown files, actionlint and zizmor on the workflows,
+# gitleaks over the full history). The audit job (trivy over the requirements files) reports
+# without blocking, and runs weekly too, for new advisories in unchanged pins.
 name: checks
 
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0  # gitleaks scans the full history
       - name: Checks
+        env:
+          # read-only token for zizmor's online audits (known-vulnerable and impostor actions)
+          GH_TOKEN: ${{ github.token }}
         run: tools/checks.sh
+
+  # Reported, not blocking: an advisory in a pinned dependency is a reason to look, not a reason
+  # to stop every merge.
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: trivy over the requirements files (fails only the weekly run)
+        continue-on-error: ${{ github.event_name != 'schedule' }}  # reports on push/PR; the weekly run fails so GitHub mails
+        run: tools/checks.sh audit

@@ -1,0 +1,53 @@
+# Weekly update PRs, one per ecosystem, for releases at least two weeks old.
+# Not covered, updated by hand: the Home Assistant image (stack/compose.yml's HA_IMAGE build
+# argument, kept at the release the lab is tested with; stack/Dockerfile's FROM ${HA_IMAGE} is not
+# read), the go2rtc and MediaMTX images in lab.env.example, the tool images in tools/checks.sh, the
+# VirtualGL download in docker/Dockerfile, the Alpine packages in stack/Dockerfile and the npm
+# version in emulator-smoke.yml.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  # The hash-pinned requirements files (versions and hashes are updated together). /tools covers
+  # tools/requirements-yamllint.txt (any *.txt with "requirements" in its name) and the
+  # requirements.txt one directory down, tools/cdp/.
+  - package-ecosystem: pip
+    directories:
+      - /stack
+      - /tools
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+
+  # The base images, pinned by digest: ubuntu (docker/) and python (tools/cdp/).
+  - package-ecosystem: docker
+    directories:
+      - /docker
+      - /tools/cdp
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      images:
+        patterns: ["*"]
+    ignore:
+      # The wheels in tools/cdp/requirements.txt are for Python 3.13: a newer Python is a change by
+      # hand, not an update; new digests of 3.13-alpine still come.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    open-pull-requests-limit: 3

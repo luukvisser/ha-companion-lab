@@ -1,0 +1,5 @@
+# gitleaks findings that are not secrets (fingerprint: commit:file:rule:line).
+# stack/lan_monitor.py's self-test uses two made-up local keys (0123456789abcdef and a reversed one)
+# for a fake monitor on 127.0.0.1; they never reach a real device.
+e4fe55e5b029f39541be5637cc63dff6a1d7f970:stack/lan_monitor.py:generic-api-key:438
+e4fe55e5b029f39541be5637cc63dff6a1d7f970:stack/lan_monitor.py:generic-api-key:519

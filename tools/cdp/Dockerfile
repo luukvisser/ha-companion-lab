@@ -4,3 +4,6 @@
 FROM python:3.13-alpine@sha256:1e1f6334529d1fb26a2ef619d7cffb30a7c7d7cc1cc7338ebee283a58d1aeaca
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.txt && rm /tmp/requirements.txt
+# Every run passes -u with the caller's uid (lib.sh, setup/, video/); this only keeps a run without
+# it from being root.
+USER 65534:65534
