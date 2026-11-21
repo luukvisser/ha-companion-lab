@@ -2,7 +2,7 @@
 # docker/README.md). Only the runtime the emulator needs is installed here: the SDK, the system
 # image and the app are downloaded on first start into volumes, by the same setup/ scripts the
 # host route uses (checksums checked against Google's repository XML).
-FROM ubuntu:noble-20260930.1@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ubuntu:noble-20261024.1@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
 # System libraries the emulator's binaries and bundled libraries load (checked with ldd against
 # emulator 37.3 on this base), the download tools the setup scripts use, and the optional viewer
