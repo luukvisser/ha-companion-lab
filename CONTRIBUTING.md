@@ -29,7 +29,9 @@ Locally, with Docker:
 
 ```bash
 tools/checks.sh          # shellcheck, bash -n (bash 5 and 3.2), Python compile and self-tests,
-                         # node --check, yamllint, the house-data grep, README link check
+                         # node --check, yamllint, the house-data grep, actionlint, zizmor,
+                         # gitleaks, README link check
+tools/checks.sh audit    # trivy over the requirements files (CI: reported, not blocking)
 ```
 
 The fake LAN monitor's self-test needs tinytuya, so it runs in the stack's image instead:

@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # GitHub's Linux runners have KVM, but only root may open it by default.
       - name: Enable KVM
@@ -49,6 +51,8 @@ jobs:
           docker compose -f docker/compose.yml up -d
           # First start downloads the SDK pieces and the image (a few GB), then boots.
           # Wait for the ready line; stop early (and fail) when the container has exited.
+          # The inner script is single-quoted on purpose: sh expands it, on every round.
+          # shellcheck disable=SC2016
           timeout 1800 sh -c 'until docker compose -f docker/compose.yml logs emulator | grep -q "ready: adb"; do
             if [ -z "$(docker compose -f docker/compose.yml ps -q --status running emulator)" ]; then
               echo "the emulator container exited:"; docker compose -f docker/compose.yml logs emulator | tail -40; exit 1
@@ -57,7 +61,8 @@ jobs:
           done'
 
       - name: Playwright sees the device and the app
-        run: |
+        # pinned by version; no lockfile for a single package in a manual example
+        run: |  # zizmor: ignore[adhoc-packages]
           npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright-core@1.62.0
           cp lab.env.example lab.env
           PW_NODE_MODULES="$RUNNER_TEMP/pw/node_modules" OUT_DIR="$RUNNER_TEMP/out" BUILDS_DIR="$RUNNER_TEMP/builds" \

@@ -22,6 +22,9 @@ Since then (11-11-2026):
 - **new `lab card` measurements:** `menu` (the menu's layout per frame after a return), `taps` (menu
   buttons tapped while the media loads, traced to the action the card runs) and `config` (every
   camera card of a dashboard file: loads without a configuration error?).
+- **CI:** actionlint, zizmor and gitleaks in `tools/checks.sh`; trivy over the requirements files
+  and the built images, weekly too (reported, not blocking); Dependabot for the actions, the
+  requirements files and the base images.
 
 First public version (11-11-2026):
 

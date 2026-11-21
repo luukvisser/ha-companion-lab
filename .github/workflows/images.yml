@@ -2,7 +2,8 @@
 # the VirtualGL download's checksum, a package version) or a build step that no longer compiles
 # (docker/vglfix/vglfix.c) shows up on the pull request, not on someone's machine. Nothing is pushed
 # anywhere: the images are built and dropped. The stack's image also runs the fake LAN monitor's
-# self-test, since that needs the image's tinytuya.
+# self-test, since that needs the image's tinytuya. Each built image is scanned with trivy (reported,
+# not blocking); the weekly run builds and scans all three, for new advisories in unchanged pins.
 name: images
 
 on:
@@ -24,10 +25,16 @@ on:
       - stack/requirements.txt
       - stack/compose.yml
       - stack/lan_monitor.py
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -77,3 +84,8 @@ jobs:
         run: >-
           docker run --rm --network none -v "$PWD/stack/lan_monitor.py:/app/lan_monitor.py:ro"
           --entrypoint python3 lab-ci-avent-ha -I /app/lan_monitor.py --self-test
+      - name: trivy over the image (fails only the weekly run)
+        continue-on-error: ${{ github.event_name != 'schedule' }}  # reports on push/PR; the weekly run fails so GitHub mails
+        env:
+          NAME: ${{ matrix.name }}
+        run: tools/checks.sh image-audit "lab-ci-$NAME"
