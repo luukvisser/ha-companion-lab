@@ -87,5 +87,8 @@ To use your own Home Assistant instead, set `HA_URL`, `HA_URL_EMULATOR`, `HA_TOK
 | `LAB_AVENT` | `auto` | the Philips Avent add-on: `on`, `off`, or `auto` (on when an aventproxy checkout is at `AVENT_INTEGRATION_SRC`) |
 | `AVENT_INTEGRATION_SRC`, `AVENT_INTEGRATION_REF` | `~/aventproxy`, `origin/main` | where the integration is copied from (`WORKTREE`: the files as they are) |
 | `AVENT_LAB_SIM_SOURCE`, `AVENT_LAB_CAMERA_NAME` | the test stream's `baby` path, `Lab baby monitor` | the simulated camera |
+| `LAB_AVENT_LAN` | `off` | fake baby monitors on the Tuya LAN protocol for the integration's LAN client (`on` needs the Avent add-on; [stack/README.md](../stack/README.md#fake-lan-monitors-optional)) |
+| `AVENT_LAB_LAN_34_VERSION`, `AVENT_LAB_LAN_33_VERSION`, `AVENT_LAB_LAN_DISCOVERY` | `3.4`, `3.3`, `on` | the two fake monitors' protocols at start, and their discovery broadcasts |
+| `AVENT_LAB_LAN_33_QUERY` | `unvalid` | how the 3.3 monitor answers a status query: `unvalid` (the text an SCD923 sends), `state` or `silent` |
 | `LAB_DEFAULT_BUILD`, `LAB_DEFAULT_STREAM` | `main`, the test stream's `pattern_pcma` (with audio) | the test camera's stream at `lab up`, and what `lab reset-state` restores |
 | `LAB_PIN_HA_URL`, `LAB_PIN_HA_TOKEN_FILE`, `LAB_PIN_TEST_USER_PASSWORD_FILE` | none | set by the lab itself (all three or none): every write to Home Assistant goes to the pinned one; `lab.env` cannot set or change them (lib.sh) |

@@ -1,7 +1,8 @@
 # Builds the lab's own container images when their files change, so a broken pin (an image digest,
 # the VirtualGL download's checksum, a package version) or a build step that no longer compiles
 # (docker/vglfix/vglfix.c) shows up on the pull request, not on someone's machine. Nothing is pushed
-# anywhere: the images are built and dropped.
+# anywhere: the images are built and dropped. The stack's image also runs the fake LAN monitor's
+# self-test, since that needs the image's tinytuya.
 name: images
 
 on:
@@ -12,6 +13,7 @@ on:
       - stack/Dockerfile
       - stack/requirements.txt
       - stack/compose.yml
+      - stack/lan_monitor.py
       - .github/workflows/images.yml
   push:
     branches: [main]
@@ -21,6 +23,7 @@ on:
       - stack/Dockerfile
       - stack/requirements.txt
       - stack/compose.yml
+      - stack/lan_monitor.py
   workflow_dispatch:
 
 permissions:
@@ -67,3 +70,10 @@ jobs:
             args=(--build-arg "HA_IMAGE=$ha")
           fi
           docker build --pull "${args[@]}" -f "$DOCKERFILE" -t "lab-ci-$NAME" "$CONTEXT"
+      # The fake LAN monitor (stack/lan_monitor.py) against the tinytuya this image pins, as the
+      # integration's client: frames per protocol, the session limit, the wrong-key hold, faults.
+      - name: Self-test the fake LAN monitor
+        if: matrix.name == 'avent-ha'
+        run: >-
+          docker run --rm --network none -v "$PWD/stack/lan_monitor.py:/app/lan_monitor.py:ro"
+          --entrypoint python3 lab-ci-avent-ha -I /app/lan_monitor.py --self-test

@@ -11,6 +11,11 @@ Since then (11-11-2026):
   AVD lock, and the stream recorded in `meta.json`.
 - **`lab card doubletap`** uses Chrome's synthesized double tap and zooms in with `ptz_digital`:
   touch events sent one by one reach the page several times slower than sent.
+- **fake LAN monitors** (`LAB_AVENT_LAN=on`, with the Avent add-on): two fake baby monitors on the
+  Tuya LAN protocol (3.3, 3.4, 3.5; `stack/lan_monitor.py`) for the integration's LAN client:
+  discovery, the session-key handshake, heartbeats, queries, writes and pushes, the session limit
+  and wrong-key hold measured on a real monitor, and faults (`stack.sh lan`); the fake cloud reports
+  both with their made-up local keys. CI runs the fake's self-test against tinytuya.
 - **new `lab card` measurements:** `menu` (the menu's layout per frame after a return), `taps` (menu
   buttons tapped while the media loads, traced to the action the card runs) and `config` (every
   camera card of a dashboard file: loads without a configuration error?).

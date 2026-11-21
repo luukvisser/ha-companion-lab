@@ -20,6 +20,10 @@
 #   stack.sh talk            what the simulated bridge received as talk-back, per session:
 #                                duration, level, dominant frequency, share of the lab's 1 kHz tone
 #                                (sim_talk.py; needs `up --bridge`)
+#   stack.sh lan [34|33] <command>   the fake LAN monitors (LAB_AVENT_LAN=on; lan_monitor.py):
+#                                state | push '<json>' | fault silent|refuse|close|normal |
+#                                version 3.3|3.4|3.5 | discovery on|off | ip <172.31.240.x>;
+#                                `stack.sh lan selftest` runs lan_monitor.py's self-test
 #
 # Nothing here touches another stack: own networks (one of them internal), own ports on
 # 127.0.0.1, own data folder ($LAB_HA_DATA). Credentials live only in that folder, mode 600.
@@ -27,6 +31,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/../lib.sh"
 export LAB_HA_DATA LAB_HA_PORT LAB_WEBRTC_PORT AVENT_LAB_SIM_SOURCE AVENT_LAB_CAMERA_NAME
+export AVENT_LAB_LAN_DISCOVERY AVENT_LAB_LAN_34_VERSION AVENT_LAB_LAN_33_VERSION AVENT_LAB_LAN_33_QUERY
 IMAGE=ha-companion-lab-ha:2026.11.0
 HA_LOCAL="http://127.0.0.1:$LAB_HA_PORT"
 # The Avent add-on: LAB_AVENT=on|off, or auto (on when the aventproxy checkout is there).
@@ -37,8 +42,12 @@ avent_on() {
     *) [ -d "$AVENT_INTEGRATION_SRC/custom_components/philips_avent" ] ;;
   esac
 }
+# The fake LAN monitors (compose.avent-lan.yml): LAB_AVENT_LAN=on, on top of the Avent add-on.
+lan_on() { [ "${LAB_AVENT_LAN:-off}" = on ] && avent_on; }
 compose() {
-  if avent_on; then
+  if lan_on; then
+    docker compose -f "$HERE/compose.yml" -f "$HERE/compose.avent.yml" -f "$HERE/compose.avent-lan.yml" "$@"
+  elif avent_on; then
     docker compose -f "$HERE/compose.yml" -f "$HERE/compose.avent.yml" "$@"
   else
     docker compose -f "$HERE/compose.yml" "$@"
@@ -114,6 +123,23 @@ lockdown() {
   echo "lockdown: outbound limited to the stack's own network in $n containers"
 }
 
+# The fake LAN monitors' made-up ids, names and local keys, written once (keys stay the same across
+# restarts, as a real monitor's do until the cloud rotates them). Mode 600; never printed.
+lan_keys() {
+  local f="$LAB_HA_DATA/lan/monitors.json"
+  mkdir -p "$LAB_HA_DATA/lan"
+  [ -s "$f" ] && return 0
+  (umask 077 && python3 -I -c '
+import json, secrets, string, sys
+alphabet = string.ascii_letters + string.digits
+key = lambda: "".join(secrets.choice(alphabet) for _ in range(16))
+json.dump({"monitors": [
+    {"id": "labavent000000000001", "name": sys.argv[2], "product": "labproduct000000", "key": key()},
+    {"id": "labavent000000000002", "name": "Lab second monitor", "product": "labproduct000002", "key": key()},
+]}, open(sys.argv[1], "w"), indent=1)' "$f.tmp" "$AVENT_LAB_CAMERA_NAME" && mv "$f.tmp" "$f")
+  echo "fake LAN monitors: made-up local keys written to $f"
+}
+
 first_config() {
   local cfg="$LAB_HA_DATA/ha/configuration.yaml"
   [ -e "$cfg" ] && return 0
@@ -141,6 +167,10 @@ up() {
   local avent="" certs=""
   avent_on && avent=1
   [ -n "$avent" ] && copy_integration
+  if [ "${LAB_AVENT_LAN:-off}" = on ] && [ -z "$avent" ]; then
+    echo "LAB_AVENT_LAN=on needs the Avent add-on (an aventproxy checkout, or LAB_AVENT=on)" >&2; exit 1
+  fi
+  lan_on && lan_keys
   # Built by the Docker daemon: `nice` on this command would not lower the build itself.
   docker compose -f "$HERE/compose.yml" build -q homeassistant
   if [ -n "$avent" ]; then
@@ -241,7 +271,67 @@ status() {
   fi
   echo "Home Assistant: $HA_LOCAL (from the emulator: http://localhost:$LAB_HA_PORT, adb reverse)"
   echo "test dashboard: $TEST_PATH; test camera: camera.test_pattern; Avent add-on: $(avent_on && echo "on, camera $(cat "$LAB_HA_DATA/camera-entity" 2>/dev/null || echo -)" || echo off)"
+  if lan_on; then
+    echo "fake LAN monitors: lab-lan-34 (172.31.240.30), lab-lan-33 (172.31.240.31) unless moved with stack.sh lan ip; stack.sh lan [34|33] state"
+  fi
   echo "credentials and token: $LAB_HA_DATA (mode 600; never printed)"
+}
+
+# The fake LAN monitors' control endpoint (lan_monitor.py), reached from inside the container.
+lan_call() { # lan_call <container> <action> [json]
+  docker exec "$1" python3 -I -c '
+import json, sys, urllib.error, urllib.request
+url = "http://127.0.0.1:8080/lab/" + sys.argv[1]
+r = urllib.request.Request(url, data=sys.argv[2].encode() if len(sys.argv) > 2 else None,
+                           headers={"Content-Type": "application/json"})
+try:
+    print(json.dumps(json.load(urllib.request.urlopen(r)), indent=1))
+except urllib.error.HTTPError as e:
+    sys.exit("refused: %s" % e.read().decode())
+except urllib.error.URLError as e:
+    sys.exit("not reachable: %s" % e.reason)' "${@:2}"
+}
+
+lan() {
+  if [ "${1:-}" = selftest ]; then
+    docker run --rm --name lab-lan-selftest --network none --cpus 2 --memory 2g \
+      -v "$HERE/lan_monitor.py:/app/lan_monitor.py:ro" --entrypoint python3 "$IMAGE" -I /app/lan_monitor.py --self-test
+    return
+  fi
+  local which=34
+  case "${1:-}" in 34 | 33) which=$1; shift ;; esac
+  local c="lab-lan-$which" cmd=${1:-state}
+  docker ps --format '{{.Names}}' | grep -qx "$c" ||
+    { echo "$c is not running (LAB_AVENT_LAN=on stack.sh up)" >&2; exit 1; }
+  case "$cmd" in
+    state) lan_call "$c" state ;;
+    push) lan_call "$c" dps "${2:?usage: stack.sh lan [34|33] push '<json>'}" ;;
+    fault) lan_call "$c" fault "{\"fault\": \"${2:?silent, refuse, close or normal}\"}" ;;
+    version) lan_call "$c" version "{\"version\": \"${2:?3.3, 3.4 or 3.5}\"}" ;;
+    discovery)
+      case "${2:-}" in on) lan_call "$c" discovery '{"on": true}' ;; off) lan_call "$c" discovery '{"on": false}' ;;
+        *) echo "usage: stack.sh lan [34|33] discovery on|off" >&2; exit 1 ;; esac ;;
+    ip)
+      # The monitor restarts on another address, as after a new DHCP lease: it leaves the network
+      # first, so its sessions end without a word to the client (as a camera that reboots), then
+      # comes back with the new address, which its broadcasts announce. The container keeps its
+      # network namespace, so its lockdown stays. Back: `ip` with its own address (.30 or .31).
+      local ip=${2:?usage: stack.sh lan [34|33] ip 172.31.240.<n>}
+      [[ "$ip" =~ ^172\.31\.240\.([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -ge 30 ] && [ "${BASH_REMATCH[1]}" -le 250 ] ||
+        { echo "the new address must be 172.31.240.30-250 (lower ones belong to the stack)" >&2; exit 1; }
+      local net=ha-companion-lab-stack_lab old
+      old=$(docker inspect -f '{{with index .NetworkSettings.Networks "ha-companion-lab-stack_lab"}}{{.IPAddress}}{{end}}' "$c")
+      [ "$old" = "$ip" ] && { echo "$c: already at $ip"; return; }
+      [ -n "$old" ] && docker network disconnect "$net" "$c"
+      lan_call "$c" fault '{"fault": "close"}' >/dev/null
+      if ! docker network connect --ip "$ip" "$net" "$c"; then
+        # Address taken (the other monitor's, say): back where it was, so the monitor is not lost.
+        [ -n "$old" ] && docker network connect --ip "$old" "$net" "$c"
+        echo "$c: could not take $ip; back at ${old:-no address}" >&2; exit 1
+      fi
+      echo "$c: now at $ip" ;;
+    *) sed -n '/^#   stack.sh lan /,/^#.*selftest/p' "$0" ;;
+  esac
 }
 
 dps() {
@@ -261,7 +351,9 @@ import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/lab/d
 reset() {
   read -r -p "Delete the stack and $LAB_HA_DATA (HA config, token, passwords)? Type yes: " answer
   [ "$answer" = yes ] || { echo "kept"; return; }
-  compose --profile bridge down -v
+  # --remove-orphans: also the fake LAN monitors when LAB_AVENT_LAN is off by now (their bind mount
+  # is in the folder deleted below).
+  compose --profile bridge down -v --remove-orphans
   # Home Assistant writes as root; delete through a container, limited to this one folder.
   docker run --rm -v "$LAB_HA_DATA:/d" --entrypoint find "$IMAGE" /d -mindepth 1 -delete
   rmdir "$LAB_HA_DATA"
@@ -290,7 +382,8 @@ talk() {
 
 case "${1:-}" in
   up) up "${2:-}" ;;
-  down) compose --profile bridge down ;;
+  # --remove-orphans: also the fake LAN monitors when LAB_AVENT_LAN is off by now.
+  down) compose --profile bridge down --remove-orphans ;;
   reset) reset ;;
   card) card "${2:-}" ;;
   status) status ;;
@@ -298,5 +391,6 @@ case "${1:-}" in
   dps) dps "${2:-}" ;;
   logs) compose --profile bridge logs -f "${2:-homeassistant}" ;;
   talk) talk ;;
-  *) sed -n '2,19p' "$0" ;;
+  lan) shift; lan "$@" ;;
+  *) awk 'NR > 1 && /^# Nothing here/ { exit } NR > 1' "$0" ;;
 esac

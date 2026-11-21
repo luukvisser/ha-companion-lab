@@ -3,7 +3,7 @@
 The integration talks to one endpoint, `POST https://<host>/api.json`, with the action in the form
 field `a`. This answers the actions the integration uses (login with MFA, device discovery, device
 state, data-point writes, signal strength, the P2P password) for one simulated monitor, keeps its
-data points in memory, and logs every action without its parameters.
+data points in memory, and logs every action without its parameters (only the made-up devId).
 
 It never checks a password or a signature: any login with any MFA code succeeds, so nothing real
 is ever needed. A second, plain-HTTP port (internal to the stack only) lets tests read and change
@@ -11,9 +11,14 @@ the monitor's data points, e.g. to raise a sound alert:
 
   GET  /lab/dps                 -> the current data points
   POST /lab/dps  {"207": 2350}  -> merge (a temperature of 23.5 C, as the integration reads it)
+  (?dev=<device id> for another device than the first)
 
 Settings (environment): FAKE_TUYA_CERT / FAKE_TUYA_KEY (TLS for the API port), FAKE_TUYA_DEVICE_ID,
-FAKE_TUYA_DEVICE_NAME, FAKE_TUYA_API_HOST (the host the login reports as the account's API host).
+FAKE_TUYA_DEVICE_NAME, FAKE_TUYA_API_HOST (the host the login reports as the account's API host),
+FAKE_TUYA_LAN_MONITORS (the fake LAN monitors' file, lan_monitor.py: with it, each of those monitors
+is a device here with its local key, so the integration starts its LAN client; without it, as before,
+no device has a local key). A monitors-file entry's "product" is the device's productId (also for
+the first device).
 """
 import base64
 import json
@@ -69,6 +74,32 @@ DEVICE = {
 }
 
 
+def load_devices() -> dict[str, dict]:
+    """The devices by id: the simulated monitor, plus the fake LAN monitors when they are on."""
+    devices = {DEVICE_ID: dict(DEVICE)}
+    path = os.environ.get("FAKE_TUYA_LAN_MONITORS")
+    if not path:
+        return devices
+    with open(path) as f:
+        for m in json.load(f)["monitors"]:
+            device = devices.setdefault(m["id"], {"devId": m["id"], "name": m.get("name") or m["id"],
+                                                  "productId": m.get("product", ""), "category": "sp"})
+            device["localKey"] = m["key"]
+            if m.get("product"):
+                device["productId"] = m["product"]
+    return devices
+
+
+def listed() -> list[dict]:
+    """The device records the lists report."""
+    return list(DEVICES.values())
+
+
+DEVICES = load_devices()
+# Per device; the first device's are DPS above, the others start from a copy of them.
+DPS_BY_ID = {dev_id: DPS if dev_id == DEVICE_ID else dict(DPS) for dev_id in DEVICES}
+
+
 def ok(result):
     return web.json_response({"success": True, "result": result, "t": 0})
 
@@ -88,7 +119,7 @@ async def api(request: web.Request) -> web.Response:
     form = await request.post()
     action = form.get("a", "")
     data = post_data(form)
-    LOG.info("action %s", action)
+    LOG.info("action %s%s", action, " " + data["devId"] if isinstance(data.get("devId"), str) else "")
 
     if action == "thing.m.user.username.token.get":
         return ok({"pbKey": PB_KEY, "token": secrets.token_hex(16), "exponent": "65537"})
@@ -120,16 +151,21 @@ async def api(request: web.Request) -> web.Response:
     if action == "m.life.home.space.list":
         return ok([{"gid": 1001, "name": "Lab"}])
     if action == "tuya.m.location.get":
-        return ok([{"name": "Lab room", "deviceList": [DEVICE]}])
+        return ok([{"name": "Lab room", "deviceList": listed()}])
     if action in ("tuya.m.my.group.device.list", "tuya.m.device.list.get"):
-        return ok([DEVICE])
+        return ok(listed())
     if action == "tuya.m.device.get":
-        if data.get("devId") != DEVICE_ID:
+        device = DEVICES.get(data.get("devId"))
+        if device is None:
             return fail("DEVICE_NOT_EXIST", "No such device")
-        # No localKey: the integration then skips its LAN client (no camera on any LAN).
-        return ok({**DEVICE, "dps": dict(DPS), "isOnline": True})
+        # A localKey only for the fake LAN monitors (FAKE_TUYA_LAN_MONITORS); without one the
+        # integration skips its LAN client (no camera on any LAN).
+        return ok({**device, "dps": dict(DPS_BY_ID[device["devId"]]), "isOnline": True})
     if action == "tuya.m.device.dp.publish":
-        DPS.update(data.get("dps") or {})
+        dps = DPS_BY_ID.get(data.get("devId"))
+        if dps is None:
+            return fail("DEVICE_NOT_EXIST", "No such device")
+        dps.update(data.get("dps") or {})
         return ok(True)
     if action == "tuya.m.device.upgrade.rssi.info.query":
         return ok({"value": -48})
@@ -138,14 +174,22 @@ async def api(request: web.Request) -> web.Response:
     return fail("UNKNOWN_API", f"The fake does not implement {action}")
 
 
-async def lab_get(_request: web.Request) -> web.Response:
-    return web.json_response(DPS)
+def lab_dps(request: web.Request) -> dict:
+    dps = DPS_BY_ID.get(request.query.get("dev", DEVICE_ID))
+    if dps is None:
+        raise web.HTTPNotFound(text="no such device")
+    return dps
+
+
+async def lab_get(request: web.Request) -> web.Response:
+    return web.json_response(lab_dps(request))
 
 
 async def lab_set(request: web.Request) -> web.Response:
-    DPS.update(await request.json())
-    LOG.info("lab set data points %s", sorted(DPS))
-    return web.json_response(DPS)
+    dps = lab_dps(request)
+    dps.update(await request.json())
+    LOG.info("lab set data points %s", sorted(dps))
+    return web.json_response(dps)
 
 
 async def main() -> None:
@@ -162,7 +206,8 @@ async def main() -> None:
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", port, ssl_context=tls).start()
-    LOG.info("fake Tuya API on 443 (TLS), lab control on 8080")
+    LOG.info("fake Tuya API on 443 (TLS), lab control on 8080; %d device(s), %d with a local key",
+             len(DEVICES), sum("localKey" in d for d in DEVICES.values()))
     import asyncio
 
     await asyncio.Event().wait()

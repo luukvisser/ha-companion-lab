@@ -32,6 +32,9 @@ tools/checks.sh          # shellcheck, bash -n (bash 5 and 3.2), Python compile 
                          # node --check, yamllint, the house-data grep, README link check
 ```
 
+The fake LAN monitor's self-test needs tinytuya, so it runs in the stack's image instead:
+`stack/stack.sh lan selftest` (in CI: `images.yml`).
+
 Changes that affect the emulator, the app or the stacks also need a run on a device: describe it in
 the pull request.
 
