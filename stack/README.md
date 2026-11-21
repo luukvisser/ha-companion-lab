@@ -48,7 +48,45 @@ audio. `stack.sh talk` shows what the simulated camera received in a call (lengt
 lab tone's frequency); `stack.sh dps '{"207": 2450}'` sets the monitor's data points. Files:
 `compose.avent.yml`, `fake_tuya.py`, `certs.py`, `sim_talk.py`.
 
+## Fake LAN monitors (optional)
+
+`LAB_AVENT_LAN=on stack/stack.sh up` (with the Avent add-on) adds two fake baby monitors that speak
+the Tuya LAN protocol (`lan_monitor.py`, `compose.avent-lan.yml`), so the integration's LAN client
+(`lan.py`, tinytuya) can be measured and its fixes proven without a real camera:
+
+- `lab-lan-34` (172.31.240.30) speaks 3.4 and is the monitor the fake Tuya API already reports;
+  `lab-lan-33` (172.31.240.31) speaks 3.3 and is a second device, "Lab second monitor". With the
+  switch on, the fake API hands both a local key, so the integration starts its LAN client; with it
+  off, no device has one, as before. The keys are made up at the first `up`
+  (`$LAB_HA_DATA/lan/monitors.json`, mode 600, never printed). The integration adds new devices
+  only in its config flow: the second monitor appears in a fresh data folder.
+- Discovery: UDP 6667 broadcasts every 5 s on the lab network (3.5 in its own framing, and an
+  answer to tinytuya's discovery request on 7000); `AVENT_LAB_LAN_DISCOVERY=off` for a Home
+  Assistant that gets none, as in a bridge network. Nothing binds a port on this machine.
+- TCP 6668: the 3.4/3.5 session-key handshake, heartbeats, DP_QUERY (on 3.3 answered with "json obj
+  data unvalid", as an SCD923 does), writes (acknowledged, then pushed to every session).
+- As measured on an SCD951 (02-11-2026): at most 3 sessions, a 4th is refused; a wrong-key handshake
+  holds its session 10 s before the monitor drops it.
+
+```bash
+stack/stack.sh lan 34 state                    # protocol, faults, open sessions, data points
+stack/stack.sh lan 34 push '{"207": 2450}'     # change data points and push them (24.5 C)
+stack/stack.sh lan 34 fault silent             # keep TCP open, answer nothing (refuse: no new
+                                               # sessions; close: close every session; normal)
+stack/stack.sh lan 34 version 3.5              # a firmware update: sessions close, then 3.5
+stack/stack.sh lan 34 discovery off            # stop (or start) the broadcasts
+stack/stack.sh lan 34 ip 172.31.240.40         # back on the network at another address
+stack/stack.sh lan selftest                    # lan_monitor.py --self-test, tinytuya as the client
+```
+
+**What it proves, and what not.** The fake speaks the protocol as tinytuya (the integration's client
+library) and the integration understand it, so it proves how the integration handles these frames
+and faults, not how real firmware behaves. The session limit, the wrong-key hold and the 3.3 query
+answer follow measurements on real monitors; how a 4th session is refused, empty acks, pushes after
+a write and the rest are assumptions, listed in `lan_monitor.py`. LAN and cloud data points are
+separate: a push changes Home Assistant's state until the next cloud poll brings the cloud's value.
+
 ## Settings
 
-`LAB_HA_DATA`, `LAB_HA_PORT`, `LAB_WEBRTC_PORT`, `LAB_AVENT`, `AVENT_INTEGRATION_SRC` and
-`AVENT_INTEGRATION_REF`: see [docs/settings.md](../docs/settings.md).
+`LAB_HA_DATA`, `LAB_HA_PORT`, `LAB_WEBRTC_PORT`, `LAB_AVENT`, `AVENT_INTEGRATION_SRC`,
+`AVENT_INTEGRATION_REF` and `LAB_AVENT_LAN`: see [docs/settings.md](../docs/settings.md).

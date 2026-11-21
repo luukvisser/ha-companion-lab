@@ -23,7 +23,7 @@ handle (in particular Google's Android SDK License Agreement does not allow redi
 | MediaMTX (`bluenviron/mediamtx:*-ffmpeg`, pinned by digest), which includes FFmpeg (built with libx264, so GPL-2.0-or-later as a whole) | video | MIT (MediaMTX); GPL/LGPL (FFmpeg, x264) | `docker pull`, pinned | no |
 | go2rtc (`alexxit/go2rtc`, pinned by digest), which includes Alpine's FFmpeg 8.1.3 (`--enable-gpl`, with x264 and x265: GPL-2.0-or-later as a whole); the lab runs that FFmpeg (talk-back tone, `check-talk.sh`, `ffmpeg:` sources) | video/audio, stack | MIT (go2rtc); GPL-2.0-or-later and LGPL-2.1-or-later (FFmpeg), GPL-2.0-or-later (x264, x265) | `docker pull`, pinned | no |
 | Home Assistant (`ghcr.io/home-assistant/home-assistant`, pinned by digest) | stack | Apache-2.0 | `docker pull` as the base of a locally derived image | no |
-| tinytuya 1.20.0 and colorama 0.4.6 | stack | MIT (tinytuya); BSD-3-Clause (colorama) | `pip install` by version and wheel hash into the locally derived Home Assistant image | no |
+| tinytuya 1.20.0 and colorama 0.4.6 | stack (also imported by `stack/lan_monitor.py`) | MIT (tinytuya); BSD-3-Clause (colorama) | `pip install` by version and wheel hash into the locally derived Home Assistant image | no |
 | iproute2 7.0.0 (`tc`) | stack (`netem.sh`) | GPL-2.0-or-later | `apk add` (exact version) into the locally derived Home Assistant image | no |
 | nftables 1.1.6 (`nft`, the stack's outbound firewall) | stack (`stack.sh lockdown`) | GPL-2.0-only | `apk add` into the locally derived Home Assistant image | no |
 | Philips Avent integration ([aventproxy](https://github.com/thekoma/aventproxy) `custom_components/philips_avent`) | stack | MIT | copied at `stack.sh up` from a local aventproxy checkout into the stack's data folder (gitignored) | no |
@@ -40,3 +40,9 @@ Home Assistant's interface (Apache-2.0) and a synthetic test picture generated b
 `stack/fake_tuya.py` imitates, for interoperability testing only, the request and
 response shapes the Philips Avent integration expects from Tuya's mobile API. It contains no Tuya
 code, keys or data, and it only answers inside the stack's internal network.
+
+`stack/lan_monitor.py` imitates, for interoperability testing only, the device side of the Tuya LAN
+protocol (3.3, 3.4, 3.5) as tinytuya speaks it. It copies no tinytuya code: it imports tinytuya
+(MIT, already installed in the locally derived Home Assistant image, see the table) at run time
+for its frame packing, unpacking and AES helpers, and its self-test uses tinytuya as the client. Its
+device ids and local keys are made up (the keys at `stack.sh up`, in the stack's data folder).

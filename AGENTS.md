@@ -49,6 +49,10 @@ user, then the emulator with the app logged in. Check `./lab status` first: it m
 - **The Avent add-on** (`LAB_AVENT`, on when an aventproxy checkout exists): a fake vendor API and,
   with `./lab up --bridge`, a simulated bridge for calls and network conditions (`netem.sh`). Never
   stream-test a real monitor: a family's parent unit comes first.
+- **Fake LAN monitors** (`LAB_AVENT_LAN=on`, on top of the Avent add-on): two fake monitors on the
+  Tuya LAN protocol for the integration's LAN client, with faults on command (`stack/stack.sh lan`;
+  [stack/README.md](stack/README.md#fake-lan-monitors-optional)). Never probe a real monitor over
+  the LAN: it allows few sessions, and the parent unit needs one.
 
 ## The app's login: a limited test user
 
