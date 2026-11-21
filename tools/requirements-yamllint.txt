@@ -1,7 +1,8 @@
 # yamllint for tools/checks.sh, installed with --require-hashes --no-deps into the pinned
 # python:3.13-alpine image (x86_64 and arm64 wheels for PyYAML).
-yamllint==1.37.1 \
-    --hash=sha256:364f0d79e81409f591e323725e6a9f4504c8699ddf2d7263d8d2b539cd66a583
+yamllint==1.38.0 \
+    --hash=sha256:09e5f29531daab93366bb061e76019d5e91691ef0a40328f04c927387d1d364d \
+    --hash=sha256:fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
 pathspec==1.1.1 \
     --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
 pyyaml==6.0.3 \
