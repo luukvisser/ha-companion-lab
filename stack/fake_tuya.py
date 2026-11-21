@@ -17,8 +17,15 @@ Settings (environment): FAKE_TUYA_CERT / FAKE_TUYA_KEY (TLS for the API port), F
 FAKE_TUYA_DEVICE_NAME, FAKE_TUYA_API_HOST (the host the login reports as the account's API host),
 FAKE_TUYA_LAN_MONITORS (the fake LAN monitors' file, lan_monitor.py: with it, each of those monitors
 is a device here with its local key, so the integration starts its LAN client; without it, as before,
-no device has a local key). A monitors-file entry's "product" is the device's productId (also for
-the first device).
+no device has a local key). Every device carries a made-up "mac" from the documentation range
+00:00:5e:00:53:00/24 (RFC 7042), as tuya.m.device.get reports one, so redaction can be checked.
+
+Per device, for scenarios: a monitors-file entry's "product" is its productId (also for the first
+device), and an entry may carry "verSw" (the firmware tuya.m.device.get reports) and "hidden"
+(left out of the device lists, as a camera not yet on the account), and
+  POST /lab/device?dev=<id>  {"isOnline": false, "verSw": "2.4.2", "hidden": false, "error": "CODE"}
+merges such fields into the device record ("error": tuya.m.device.get fails with that code; null
+clears it). The cloud's own isOnline is True unless set here.
 """
 import base64
 import json
@@ -71,6 +78,7 @@ DEVICE = {
     "name": DEVICE_NAME,
     "productId": "labproduct000000",
     "category": "sp",
+    "mac": "00:00:5e:00:53:01",
 }
 
 
@@ -81,18 +89,23 @@ def load_devices() -> dict[str, dict]:
     if not path:
         return devices
     with open(path) as f:
-        for m in json.load(f)["monitors"]:
+        for n, m in enumerate(json.load(f)["monitors"], 2):
             device = devices.setdefault(m["id"], {"devId": m["id"], "name": m.get("name") or m["id"],
-                                                  "productId": m.get("product", ""), "category": "sp"})
+                                                  "productId": m.get("product", ""), "category": "sp",
+                                                  "mac": "00:00:5e:00:53:%02x" % n})
             device["localKey"] = m["key"]
             if m.get("product"):
                 device["productId"] = m["product"]
+            for field in ("verSw", "hidden"):
+                if field in m:
+                    device[field] = m[field]
     return devices
 
 
 def listed() -> list[dict]:
-    """The device records the lists report."""
-    return list(DEVICES.values())
+    """The device records the lists report: hidden ones left out, lab-only fields dropped."""
+    return [{k: v for k, v in d.items() if k not in ("hidden", "error")} for d in DEVICES.values()
+            if not d.get("hidden")]
 
 
 DEVICES = load_devices()
@@ -158,9 +171,12 @@ async def api(request: web.Request) -> web.Response:
         device = DEVICES.get(data.get("devId"))
         if device is None:
             return fail("DEVICE_NOT_EXIST", "No such device")
+        if device.get("error"):
+            return fail(device["error"], "Lab: device error set through /lab/device")
         # A localKey only for the fake LAN monitors (FAKE_TUYA_LAN_MONITORS); without one the
         # integration skips its LAN client (no camera on any LAN).
-        return ok({**device, "dps": dict(DPS_BY_ID[device["devId"]]), "isOnline": True})
+        record = {k: v for k, v in device.items() if k not in ("hidden", "error")}
+        return ok({"isOnline": True, **record, "dps": dict(DPS_BY_ID[device["devId"]])})
     if action == "tuya.m.device.dp.publish":
         dps = DPS_BY_ID.get(data.get("devId"))
         if dps is None:
@@ -192,12 +208,28 @@ async def lab_set(request: web.Request) -> web.Response:
     return web.json_response(dps)
 
 
+async def lab_device(request: web.Request) -> web.Response:
+    device = DEVICES.get(request.query.get("dev", DEVICE_ID))
+    if device is None:
+        raise web.HTTPNotFound(text="no such device")
+    for field, value in (await request.json()).items():
+        if field not in ("isOnline", "verSw", "hidden", "error"):
+            raise web.HTTPBadRequest(text="unknown field")
+        if value is None:
+            device.pop(field, None)
+        else:
+            device[field] = value
+    LOG.info("lab set device fields %s", sorted(device))
+    return web.json_response({k: v for k, v in device.items() if k != "localKey"})
+
+
 async def main() -> None:
     api_app = web.Application()
     api_app.router.add_post("/api.json", api)
     lab_app = web.Application()
     lab_app.router.add_get("/lab/dps", lab_get)
     lab_app.router.add_post("/lab/dps", lab_set)
+    lab_app.router.add_post("/lab/device", lab_device)
 
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(os.environ["FAKE_TUYA_CERT"], os.environ["FAKE_TUYA_KEY"])
