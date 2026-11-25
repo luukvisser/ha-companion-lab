@@ -115,7 +115,7 @@ done
 launch_app
 for _ in $(seq 1 30); do
   sleep 2
-  pid=$(app_pid)
+  pid=$(app_pid || true)  # pidof exits 1 until the app runs; set -e would end the script
   [ -n "$pid" ] || continue
   # Captured, then searched (see above): the socket list is long, and a piped grep -q can make the
   # pipeline fail on SIGPIPE although the socket is there.
